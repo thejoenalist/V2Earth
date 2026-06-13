@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Earth Simulator</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #050d14;
+      --surface: rgba(8, 20, 32, 0.85);
+      --border: rgba(80, 160, 220, 0.18);
+      --accent: #4aa8e8;
+      --accent-dim: rgba(74, 168, 232, 0.5);
+      --text: #d0e8f5;
+      --text-muted: rgba(208, 232, 245, 0.5);
+      --danger: #e85a4a;
+      --panel-width: 360px;
+      --timeline-height: 72px;
+      --font: 'Inter', system-ui, sans-serif;
+    }
+
+    html, body {
+      width: 100%; height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      overflow: hidden;
+    }
+
+    /* ── Globe canvas ───────────────────────────────────────── */
+    #cesium-container {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+    }
+
+    /* ── Top bar ────────────────────────────────────────────── */
+    #top-bar {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      height: 52px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      background: linear-gradient(180deg, rgba(5,13,20,0.95) 0%, transparent 100%);
+      z-index: 100;
+      pointer-events: none;
+    }
+
+    #wordmark {
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--accent);
+      pointer-events: auto;
+    }
+
+    #chapter-label {
+      font-size: 13px;
+      color: var(--text-muted);
+      letter-spacing: 0.04em;
+    }
+
+    /* ── Layer selector ─────────────────────────────────────── */
+    #layer-selector {
+      position: fixed;
+      top: 64px; left: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 100;
+    }
+
+    .layer-btn {
+      padding: 7px 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      color: var(--text-muted);
+      font-size: 12px;
+      font-family: var(--font);
+      cursor: pointer;
+      transition: all 0.15s;
+      backdrop-filter: blur(8px);
+    }
+
+    .layer-btn:hover, .layer-btn.active {
+      border-color: var(--accent-dim);
+      color: var(--accent);
+      background: rgba(74, 168, 232, 0.08);
+    }
+
+    /* ── Country panel (slides in from right) ───────────────── */
+    #country-panel {
+      position: fixed;
+      top: 52px; right: 0;
+      width: var(--panel-width);
+      bottom: calc(var(--timeline-height) + 20px);
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      backdrop-filter: blur(12px);
+      z-index: 100;
+      transform: translateX(100%);
+      transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      overflow-y: auto;
+      padding: 20px;
+    }
+
+    #country-panel.open {
+      transform: translateX(0);
+    }
+
+    /* ── Chat interface ─────────────────────────────────────── */
+    #chat-panel {
+      position: fixed;
+      bottom: calc(var(--timeline-height) + 16px);
+      left: 50%;
+      transform: translateX(-50%);
+      width: min(560px, calc(100vw - 48px));
+      z-index: 100;
+    }
+
+    #chat-messages {
+      max-height: 240px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 8px;
+      /* hidden when empty */
+    }
+
+    #chat-input-row {
+      display: flex;
+      gap: 8px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 28px;
+      padding: 8px 8px 8px 20px;
+      backdrop-filter: blur(12px);
+    }
+
+    #chat-input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text);
+      font-size: 14px;
+      font-family: var(--font);
+    }
+
+    #chat-input::placeholder { color: var(--text-muted); }
+
+    #chat-submit {
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--bg);
+      transition: opacity 0.15s;
+      flex-shrink: 0;
+    }
+
+    #chat-submit:hover { opacity: 0.85; }
+
+    /* ── Chapter timeline ───────────────────────────────────── */
+    #timeline {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      height: var(--timeline-height);
+      background: linear-gradient(0deg, rgba(5,13,20,0.98) 0%, transparent 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 60px;
+      z-index: 100;
+      gap: 0;
+    }
+
+    #timeline-track {
+      position: relative;
+      width: 100%;
+      max-width: 800px;
+      height: 2px;
+      background: var(--border);
+    }
+
+    #timeline-fill {
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      background: var(--accent-dim);
+      transition: width 0.3s ease;
+    }
+
+    .chapter-stop {
+      position: absolute;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      cursor: pointer;
+    }
+
+    .chapter-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: var(--border);
+      border: 2px solid var(--bg);
+      transition: background 0.2s, transform 0.2s;
+      position: relative;
+      z-index: 1;
+    }
+
+    .chapter-stop.active .chapter-dot,
+    .chapter-stop:hover .chapter-dot {
+      background: var(--accent);
+      transform: scale(1.4);
+    }
+
+    .chapter-stop-label {
+      position: absolute;
+      top: 14px;
+      font-size: 10px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      letter-spacing: 0.03em;
+      transition: color 0.2s;
+    }
+
+    .chapter-stop.active .chapter-stop-label {
+      color: var(--accent);
+    }
+
+    .chapter-stop-year {
+      position: absolute;
+      bottom: 14px;
+      font-size: 9px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      opacity: 0.6;
+    }
+
+    /* ── SSP toggle ─────────────────────────────────────────── */
+    #ssp-toggle {
+      position: fixed;
+      bottom: calc(var(--timeline-height) + 12px);
+      right: 20px;
+      display: flex;
+      gap: 4px;
+      z-index: 100;
+    }
+
+    .ssp-btn {
+      padding: 5px 12px;
+      font-size: 11px;
+      border-radius: 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      cursor: pointer;
+      font-family: var(--font);
+      transition: all 0.15s;
+      backdrop-filter: blur(8px);
+    }
+
+    .ssp-btn.active {
+      background: rgba(74, 168, 232, 0.12);
+      border-color: var(--accent-dim);
+      color: var(--accent);
+    }
+
+    /* ── Onboarding overlay ─────────────────────────────────── */
+    #onboarding {
+      position: fixed;
+      inset: 0;
+      background: rgba(5, 13, 20, 0.88);
+      z-index: 200;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 24px;
+      backdrop-filter: blur(4px);
+    }
+
+    #onboarding h1 {
+      font-size: clamp(28px, 4vw, 48px);
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: -0.02em;
+      text-align: center;
+    }
+
+    #onboarding p {
+      font-size: 16px;
+      color: var(--text-muted);
+      max-width: 440px;
+      text-align: center;
+      line-height: 1.6;
+    }
+
+    #onboarding-start {
+      margin-top: 8px;
+      padding: 14px 36px;
+      background: var(--accent);
+      border: none;
+      border-radius: 28px;
+      color: var(--bg);
+      font-size: 15px;
+      font-weight: 600;
+      font-family: var(--font);
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+
+    #onboarding-start:hover { opacity: 0.85; }
+
+    #onboarding.hidden { display: none; }
+
+    /* ── Scrollbar ──────────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  </style>
+</head>
+<body>
+
+  <!-- Globe -->
+  <div id="cesium-container"></div>
+
+  <!-- Top bar -->
+  <header id="top-bar">
+    <div id="wordmark">Earth Simulator</div>
+    <div id="chapter-label">The World Today</div>
+  </header>
+
+  <!-- Layer selector -->
+  <nav id="layer-selector">
+    <button class="layer-btn active" data-layer="climate">Climate Risk</button>
+    <button class="layer-btn" data-layer="economy">Economy</button>
+    <button class="layer-btn" data-layer="conflict">Conflict</button>
+    <button class="layer-btn" data-layer="food">Food &amp; Water</button>
+    <button class="layer-btn" data-layer="migration">Migration</button>
+  </nav>
+
+  <!-- Country panel -->
+  <aside id="country-panel"></aside>
+
+  <!-- Chat interface -->
+  <section id="chat-panel">
+    <div id="chat-messages"></div>
+    <div id="chat-input-row">
+      <input
+        id="chat-input"
+        type="text"
+        placeholder="Ask about any country, event, or scenario…"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <button id="chat-submit" aria-label="Send">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M2 8L14 8M14 8L9 3M14 8L9 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>
+  </section>
+
+  <!-- SSP pathway toggle -->
+  <div id="ssp-toggle">
+    <button class="ssp-btn active" data-ssp="SSP2-4.5">If we act</button>
+    <button class="ssp-btn" data-ssp="SSP5-8.5">If we don't</button>
+  </div>
+
+  <!-- Chapter timeline -->
+  <footer id="timeline">
+    <div id="timeline-track">
+      <div id="timeline-fill"></div>
+      <!-- Chapter stops injected by ChapterTimeline.js -->
+    </div>
+  </footer>
+
+  <!-- Onboarding -->
+  <div id="onboarding">
+    <h1>See where the Earth is headed.</h1>
+    <p>Explore real climate projections, economic shifts, and cascading crises — from today to 2500.</p>
+    <button id="onboarding-start">Explore the Earth</button>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

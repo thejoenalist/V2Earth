@@ -1,0 +1,98 @@
+# .github/workflows/weekly-pipeline.yml
+#
+# Earth Simulator V2 — Weekly Data Refresh
+#
+# Runs every Monday at 6am UTC. Re-fetches upstream data sources,
+# re-bakes static JSON, validates the output, and commits the updated
+# files if anything changed.
+#
+# Also runs on manual trigger (Actions → "Run workflow") so you can
+# force a refresh from VS Code or GitHub without waiting for Monday.
+#
+# CI/CD explained simply:
+#   CI = Continuous Integration: automatically checks that the code builds
+#        and data is valid every time something changes.
+#   CD = Continuous Deployment: automatically publishes the updated site
+#        when checks pass. Netlify handles this part automatically on push.
+#
+# This workflow is the CI layer for the data pipeline specifically.
+# Netlify handles build + deploy of the frontend on every push to main.
+
+name: Weekly Data Pipeline
+
+on:
+  # Every Monday at 6am UTC
+  schedule:
+    - cron: '0 6 * * 1'
+
+  # Manual trigger from GitHub Actions UI or VS Code GitHub Actions extension
+  workflow_dispatch:
+    inputs:
+      only:
+        description: 'Run only one pipeline step (leave blank for all)'
+        required: false
+        type: choice
+        options:
+          - ''
+          - climate
+          - worldbank
+          - boundaries
+          - validate
+
+jobs:
+  refresh-data:
+    name: Refresh and validate baked data
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      # ── Setup ──────────────────────────────────────────────────────────────
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        run: pip install -r pipeline/requirements.txt
+
+      # ── Fetch + Bake ───────────────────────────────────────────────────────
+      - name: Run data pipeline
+        env:
+          # Add any API keys as GitHub Secrets (Settings → Secrets → Actions)
+          # World Bank API does not require a key but rate-limits unauthenticated requests
+          PIPELINE_ENV: production
+        run: |
+          if [ -n "${{ github.event.inputs.only }}" ]; then
+            python pipeline/bake_all.py --only ${{ github.event.inputs.only }}
+          else
+            python pipeline/bake_all.py
+          fi
+
+      # ── Validate ───────────────────────────────────────────────────────────
+      - name: Validate baked data
+        run: python pipeline/validate.py
+        # This step exits with code 1 if validation fails, which fails the job.
+        # A failed job sends a GitHub notification and blocks the commit below.
+
+      # ── Commit if changed ──────────────────────────────────────────────────
+      - name: Commit updated data files
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: 'data: weekly pipeline refresh [skip ci]'
+          file_pattern: 'public/data/**'
+          commit_author: 'Earth Simulator Bot <bot@earthsimulator.app>'
+          # [skip ci] in the commit message prevents an infinite loop
+          # where the commit triggers another CI run.
+
+      # ── Notify on failure ──────────────────────────────────────────────────
+      - name: Notify on pipeline failure
+        if: failure()
+        run: |
+          echo "::error::Weekly data pipeline failed. Check the logs above."
+          echo "::error::The site will continue serving the last successfully baked data."
+          echo "::error::Run 'python pipeline/validate.py' locally to diagnose."
+          # Add Slack/email notification here when needed
