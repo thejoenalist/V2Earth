@@ -1,0 +1,93 @@
+/**
+ * Approximate country centroids (ISO 3166-1 alpha-3 → { lat, lon }).
+ * Used to place simulation placeholders when the parser returns a target ISO.
+ */
+export const ISO_CENTROIDS = Object.freeze({
+  AFG: { lat: 33.939, lon: 67.710 },
+  ALB: { lat: 41.153, lon: 20.168 },
+  DZA: { lat: 28.033, lon: 1.660 },
+  AGO: { lat: -11.203, lon: 17.874 },
+  ARG: { lat: -38.416, lon: -63.617 },
+  AUS: { lat: -25.274, lon: 133.775 },
+  BGD: { lat: 23.685, lon: 90.357 },
+  BFA: { lat: 12.238, lon: -1.561 },
+  BRA: { lat: -14.235, lon: -51.925 },
+  CAN: { lat: 56.130, lon: -106.347 },
+  CHN: { lat: 35.861, lon: 104.195 },
+  COD: { lat: -4.038, lon: 21.759 },
+  COL: { lat: 4.570, lon: -74.297 },
+  EGY: { lat: 26.820, lon: 30.802 },
+  ETH: { lat: 9.145, lon: 40.490 },
+  FRA: { lat: 46.228, lon: 2.214 },
+  DEU: { lat: 51.166, lon: 10.452 },
+  GBR: { lat: 55.378, lon: -3.436 },
+  IND: { lat: 20.594, lon: 78.963 },
+  IDN: { lat: -0.789, lon: 113.921 },
+  IRN: { lat: 32.428, lon: 53.688 },
+  IRQ: { lat: 33.223, lon: 43.679 },
+  ISR: { lat: 31.046, lon: 34.852 },
+  ITA: { lat: 41.872, lon: 12.567 },
+  JPN: { lat: 36.204, lon: 138.253 },
+  KEN: { lat: -0.024, lon: 37.906 },
+  MEX: { lat: 23.635, lon: -102.553 },
+  MLI: { lat: 17.570, lon: -3.996 },
+  MMR: { lat: 21.916, lon: 95.956 },
+  NER: { lat: 17.608, lon: 8.082 },
+  NGA: { lat: 9.082, lon: 8.675 },
+  PAK: { lat: 30.376, lon: 69.345 },
+  PHL: { lat: 12.880, lon: 121.774 },
+  RUS: { lat: 61.524, lon: 105.319 },
+  SAU: { lat: 23.886, lon: 45.079 },
+  SEN: { lat: 14.497, lon: -14.452 },
+  SOM: { lat: 5.152, lon: 46.199 },
+  ZAF: { lat: -30.560, lon: 22.937 },
+  KOR: { lat: 35.908, lon: 127.767 },
+  SSD: { lat: 6.877, lon: 31.307 },
+  SDN: { lat: 12.863, lon: 30.218 },
+  TCD: { lat: 15.454, lon: 18.732 },
+  TUR: { lat: 38.964, lon: 35.243 },
+  UKR: { lat: 48.380, lon: 31.166 },
+  USA: { lat: 39.828, lon: -98.580 },
+  VNM: { lat: 14.058, lon: 108.277 },
+  MRT: { lat: 21.007, lon: -10.940 },
+  GIN: { lat: 9.945, lon: -9.697 },
+  GMB: { lat: 13.443, lon: -15.310 },
+  CMR: { lat: 7.370, lon: 12.354 },
+  NPL: { lat: 28.394, lon: 84.124 },
+  LKA: { lat: 7.874, lon: 80.772 },
+  THA: { lat: 15.870, lon: 100.993 },
+  MYS: { lat: 4.210, lon: 101.976 },
+  PER: { lat: -9.190, lon: -75.015 },
+  CHL: { lat: -35.675, lon: -71.543 },
+  VEN: { lat: 6.423, lon: -66.590 },
+  ESP: { lat: 40.464, lon: -3.749 },
+  POL: { lat: 51.919, lon: 19.145 },
+  NLD: { lat: 52.133, lon: 5.292 },
+  SWE: { lat: 60.128, lon: 18.644 },
+  NOR: { lat: 60.472, lon: 8.469 },
+  FIN: { lat: 61.924, lon: 25.748 },
+  GRC: { lat: 39.074, lon: 21.824 },
+  PRT: { lat: 39.399, lon: -8.224 },
+  BEL: { lat: 50.503, lon: 4.470 },
+  CHE: { lat: 46.818, lon: 8.228 },
+  AUT: { lat: 47.516, lon: 14.550 },
+  CZE: { lat: 49.818, lon: 15.473 },
+  HUN: { lat: 47.163, lon: 19.504 },
+  ROU: { lat: 45.943, lon: 24.967 },
+  BGR: { lat: 42.734, lon: 25.486 },
+  HRV: { lat: 45.100, lon: 15.200 },
+  NZL: { lat: -40.901, lon: 174.886 },
+  PNG: { lat: -6.315, lon: 143.956 },
+});
+
+/** Sahel regional centroid when no single country is targeted. */
+export const SAHEL_CENTROID = Object.freeze({ lat: 14.0, lon: 2.0 });
+
+/**
+ * @param {string | null | undefined} iso
+ * @returns {{ lat: number, lon: number } | null}
+ */
+export function getCentroid(iso) {
+  if (!iso) return null;
+  return ISO_CENTROIDS[iso] ?? null;
+}

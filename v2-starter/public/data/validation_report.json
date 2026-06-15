@@ -1,0 +1,17 @@
+{
+  "validated_at": "2026-06-13T15:53:55.422927+00:00",
+  "passed": true,
+  "results": {
+    "climate": "PASS",
+    "worldbank": "PASS",
+    "attribution": "PASS",
+    "geojson": "PASS",
+    "manifest": "PASS"
+  },
+  "error_count": 0,
+  "warning_count": 1,
+  "errors": [],
+  "warnings": [
+    "manifest.json: could not parse baked_at timestamp"
+  ]
+}

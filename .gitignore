@@ -5,3 +5,13 @@ dist/
 .env.production
 .DS_Store
 *.log
+
+# Vite HMR timestamp files
+vite.config.js.timestamp-*.mjs
+
+# Pipeline cache
+v2-starter/pipeline/.cache/
+
+# Supabase local dev
+.supabase/
+supabase/.temp/

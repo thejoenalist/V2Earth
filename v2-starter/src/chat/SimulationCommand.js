@@ -26,6 +26,7 @@
  * @property {string} [ssp]
  * @property {string} [comparisonSsp]       - For scenario_compare
  * @property {LocalContext} [localContext]  - For local_action queries
+ * @property {{ lon: number, lat: number }} [center] - Geographic center of the event (decimal degrees)
  */
 
 /**
@@ -330,7 +331,18 @@ ALWAYS respond with valid JSON. Choose the type that best fits the query:
            "coral_bleaching" | "glacial_recession" | "saltwater_intrusion" | "atmospheric_river" |
            "permafrost_thaw" | "marine_heatwave" | "ocean_acidification" | "glacial_lake_outburst" |
            "compound_fire_weather" | "wet_bulb_exceedance" | "ice_sheet_collapse" | "amoc_slowdown" | null,
-  "params": { "magnitude": <number|null>, "unit": "<string|null>", "year": <number|null>, "ssp": "SSP2-4.5"|"SSP5-8.5"|null },
+  "params": { "magnitude": <number|null>, "unit": "<string|null>", "year": <number|null>, "ssp": "SSP2-4.5"|"SSP5-8.5"|null, "center": { "lon": <decimal degrees>, "lat": <decimal degrees> } },
+
+CRITICAL RULE FOR center: center MUST always be the precise geographic coordinates of the specific location mentioned by the user — never the country centroid.
+Examples:
+  "hurricane in Florida" → center: { "lon": -81.5, "lat": 27.8 }  (Gulf Coast Florida)
+  "wildfire in California" → center: { "lon": -119.5, "lat": 37.5 }  (Central California)
+  "drought in the Sahel" → center: { "lon": 15.0, "lat": 15.0 }
+  "flooding in Bangladesh" → center: { "lon": 90.4, "lat": 23.7 }
+  "heatwave in India" → center: { "lon": 78.9, "lat": 26.0 }  (North India plains)
+  "sea level rise in Miami" → center: { "lon": -80.2, "lat": 25.8 }
+If the user names a city, use that city's coordinates. If they name a region within a country, use that region's center.
+center is NEVER null for climate_event type.
   "narrative": {
     "learned": "<what this reveals>",
     "action": "<what could be done at scale>",

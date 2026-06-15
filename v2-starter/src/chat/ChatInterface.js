@@ -18,16 +18,19 @@ import { ScenarioParser } from './ScenarioParser.js';
 
 export class ChatInterface {
   /**
-   * @param {{ timeController: import('../core/TimeController.js').TimeController }} deps
+   * @param {{ timeController: import('../core/TimeController.js').TimeController, sessionId?: string }} deps
    */
-  constructor({ timeController }) {
+  constructor({ timeController, sessionId = null }) {
     this._timeController = timeController;
+    this._sessionId      = sessionId;
     this._parser         = new ScenarioParser();
     this._input          = document.getElementById('chat-input');
     this._submit         = document.getElementById('chat-submit');
     this._messages       = document.getElementById('chat-messages');
     this._ejectBtn       = document.getElementById('chat-eject-btn');
+    this._panel          = document.getElementById('chat-panel');
     this._isLoading      = false;
+    this._hasSubmitted   = false;
 
     /** Active quiz state */
     this._activeQuiz     = null;   // { questions, answers: {} }
@@ -77,8 +80,14 @@ export class ChatInterface {
     this._isLoading   = true;
     this._submit.disabled = true;
 
+    // First submit: transition panel to bottom-right
+    if (!this._hasSubmitted) {
+      this._hasSubmitted = true;
+      this._panel?.classList.add('active');
+    }
+
     this._addMessage('user', text);
-    EventBus.emit('chat:query', { text, sessionId: null });
+    EventBus.emit('chat:query', { text, sessionId: this._sessionId });
 
     const loadingEl = this._addMessage('assistant', '…');
 

@@ -12,6 +12,7 @@
  */
 
 import { EventBus } from '../core/EventBus.js';
+import { supabase } from '../core/supabaseClient.js';
 
 /** @returns {string} */
 function generateSessionId() {
@@ -24,8 +25,7 @@ export class TelemetryService {
     this._events = [];
     this._activeRegion = null;
     this._regionEnteredAt = null;
-    this._supabaseUrl = import.meta.env.VITE_SUPABASE_URL ?? null;
-    this._supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY ?? null;
+    this._supabase = supabase;
 
     this._wireEventBus();
     this._log('session_start', { referrer: document.referrer || null, viewport: `${window.innerWidth}x${window.innerHeight}` });
@@ -86,18 +86,9 @@ export class TelemetryService {
   // ── Remote flush (Supabase) ───────────────────────────────────────────────
 
   async _flush(entry) {
-    if (!this._supabaseUrl || !this._supabaseKey) return;
+    if (!this._supabase) return;
     try {
-      await fetch(`${this._supabaseUrl}/rest/v1/telemetry_events`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': this._supabaseKey,
-          'Authorization': `Bearer ${this._supabaseKey}`,
-          'Prefer': 'return=minimal',
-        },
-        body: JSON.stringify(entry),
-      });
+      await this._supabase.from('telemetry_events').insert(entry);
     } catch { /* silent */ }
   }
 

@@ -63,16 +63,16 @@ export class EventSimulator {
    * @param {import('../chat/SimulationCommand.js').SimulationCommand} command
    */
   async _onRequested(command) {
-    // ── Step 1: eject if requested ─────────────────────────────────────────
+    const incomingEvent = command.params?.eventType ?? command.event ?? null;
+
     if (command.eject === true) {
       this._clearStack('user_requested');
-      // If there's no event to show after ejecting, stop here
-      const hasNewEvent = command.params?.eventType || command.type === 'climate_event';
-      if (!hasNewEvent) return;
+      if (!incomingEvent) return;
     }
 
+    if (command.type !== 'climate_event' || !incomingEvent) return;
+
     // ── Step 2: resolve compound effects before modifying the stack ─────────
-    const incomingEvent = command.params?.eventType ?? null;
     let compound = null;
 
     if (this._stack.length > 0 && incomingEvent) {
@@ -90,7 +90,7 @@ export class EventSimulator {
     if (this._stack.length >= MAX_LAYERS) {
       const evicted = this._stack.shift();
       const evictedType = evicted.eventType;
-      evicted.destroy();
+      this._destroySim(evicted);
       EventBus.emit('simulation:layer_removed', {
         eventType: evictedType,
         reason: 'stack_full',
@@ -104,10 +104,15 @@ export class EventSimulator {
       viewer: this._renderer.viewer,
       year:   this._time.year,
       ssp:    this._time.ssp,
+      stackIndex: this._stack.length,
     });
 
     this._stack.push(sim);
     this._emitStackChanged();
+
+    // Tell the globe to disable requestRenderMode so particles/shaders animate.
+    // Paired endAnimation() calls happen in _destroySim().
+    this._renderer.beginAnimation?.();
 
     try {
       await sim.start();
@@ -118,10 +123,9 @@ export class EventSimulator {
       });
     } catch (err) {
       console.error('[EventSimulator] Simulation failed to start:', err);
-      // Remove the failed sim from the stack and clean up
       const idx = this._stack.indexOf(sim);
       if (idx !== -1) this._stack.splice(idx, 1);
-      sim.destroy();
+      this._destroySim(sim);
       this._emitStackChanged();
     }
   }
@@ -132,10 +136,20 @@ export class EventSimulator {
   }
 
   /**
+   * Destroy one simulation and release its animation hold on the globe renderer.
+   * Always use this instead of calling sim.destroy() directly.
+   * @param {ActiveSimulation} sim
+   */
+  _destroySim(sim) {
+    sim.destroy();
+    this._renderer.endAnimation?.();
+  }
+
+  /**
    * @param {string} reason
    */
   _clearStack(reason = 'unknown') {
-    for (const sim of this._stack) sim.destroy();
+    for (const sim of this._stack) this._destroySim(sim);
     this._stack = [];
     this._emitStackChanged();
     EventBus.emit('simulation:ejected', { reason });

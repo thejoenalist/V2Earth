@@ -11,10 +11,7 @@ export default defineConfig({
     // Cesium assets are large — raise the chunk warning threshold
     chunkSizeWarningLimit: 3000,
   },
-  define: {
-    // Expose env variables to the client bundle
-    'import.meta.env.VITE_CLAUDE_API_KEY': JSON.stringify(process.env.VITE_CLAUDE_API_KEY),
-    'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(process.env.VITE_SUPABASE_URL),
-    'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(process.env.VITE_SUPABASE_ANON_KEY),
-  },
+  // No define block needed — Vite natively exposes VITE_* vars from .env.local
+  // via import.meta.env. Adding a define block here overrides that with
+  // process.env.* which is undefined at config-eval time, breaking the values.
 });

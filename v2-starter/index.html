@@ -118,10 +118,24 @@
     #chat-panel {
       position: fixed;
       bottom: calc(var(--timeline-height) + 16px);
+      /* centered by default — both states use `left` so the transition interpolates */
       left: 50%;
       transform: translateX(-50%);
       width: min(560px, calc(100vw - 48px));
       z-index: 100;
+      display: flex;
+      flex-direction: column;
+      transition:
+        left    0.45s cubic-bezier(0.4, 0, 0.2, 1),
+        transform 0.45s cubic-bezier(0.4, 0, 0.2, 1),
+        width   0.45s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* After first prompt: slide to bottom-right */
+    #chat-panel.active {
+      left: calc(100vw - 400px);
+      transform: none;
+      width: 380px;
     }
 
     #chat-messages {
@@ -131,7 +145,27 @@
       flex-direction: column;
       gap: 8px;
       margin-bottom: 8px;
-      /* hidden when empty */
+    }
+
+    #chat-eject-btn {
+      display: none;
+      align-self: flex-end;
+      margin-bottom: 6px;
+      padding: 4px 10px;
+      font-size: 11px;
+      font-family: var(--font);
+      color: var(--text-muted);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      cursor: pointer;
+      backdrop-filter: blur(8px);
+      transition: color 0.15s, border-color 0.15s;
+    }
+
+    #chat-eject-btn:hover {
+      color: var(--danger);
+      border-color: rgba(232, 90, 74, 0.4);
     }
 
     #chat-input-row {
@@ -253,7 +287,7 @@
     /* ── SSP toggle ─────────────────────────────────────────── */
     #ssp-toggle {
       position: fixed;
-      bottom: calc(var(--timeline-height) + 12px);
+      top: 16px;
       right: 20px;
       display: flex;
       gap: 4px;
@@ -338,42 +372,15 @@
   <!-- Globe -->
   <div id="cesium-container"></div>
 
-  <!-- Top bar -->
-  <header id="top-bar">
-    <div id="wordmark">Earth Simulator</div>
-    <div id="chapter-label">The World Today</div>
-  </header>
-
-  <!-- Layer selector -->
-  <nav id="layer-selector">
-    <button class="layer-btn active" data-layer="climate">Climate Risk</button>
-    <button class="layer-btn" data-layer="economy">Economy</button>
-    <button class="layer-btn" data-layer="conflict">Conflict</button>
-    <button class="layer-btn" data-layer="food">Food &amp; Water</button>
-    <button class="layer-btn" data-layer="migration">Migration</button>
-  </nav>
-
-  <!-- Country panel -->
-  <aside id="country-panel"></aside>
-
-  <!-- Chat interface -->
-  <section id="chat-panel">
+  <!-- Chat panel -->
+  <div id="chat-panel">
     <div id="chat-messages"></div>
     <div id="chat-input-row">
-      <input
-        id="chat-input"
-        type="text"
-        placeholder="Ask about any country, event, or scenario…"
-        autocomplete="off"
-        spellcheck="false"
-      />
-      <button id="chat-submit" aria-label="Send">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-          <path d="M2 8L14 8M14 8L9 3M14 8L9 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-      </button>
+      <textarea id="chat-input" placeholder="Ask about a climate event, region, or scenario…" rows="1"></textarea>
+      <button id="chat-submit">→</button>
     </div>
-  </section>
+    <button id="chat-eject-btn" title="Clear all simulations">✕ Clear</button>
+  </div>
 
   <!-- SSP pathway toggle -->
   <div id="ssp-toggle">
@@ -385,14 +392,13 @@
   <footer id="timeline">
     <div id="timeline-track">
       <div id="timeline-fill"></div>
-      <!-- Chapter stops injected by ChapterTimeline.js -->
     </div>
   </footer>
 
   <!-- Onboarding -->
   <div id="onboarding">
     <h1>See where the Earth is headed.</h1>
-    <p>Explore real climate projections, economic shifts, and cascading crises — from today to 2500.</p>
+    <p>Explore real climate projections, economic shifts, and cascading crises — from today to 2100.</p>
     <button id="onboarding-start">Explore the Earth</button>
   </div>
 

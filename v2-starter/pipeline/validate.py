@@ -103,6 +103,7 @@ def validate_climate(errors: list, warnings: list) -> bool:
                     continue
 
                 record = data[iso][str(year)][ssp]
+                tier = record.get("coverage_tier", "high")
 
                 # Check required fields exist
                 for field, (lo, hi) in FIELD_BOUNDS.items():
@@ -110,6 +111,12 @@ def validate_climate(errors: list, warnings: list) -> bool:
                         warnings.append(f"climate.json: {iso}/{year}/{ssp} missing field '{field}'")
                         continue
                     val = record[field]
+                    if val is None:
+                        if tier != "sparse":
+                            warnings.append(
+                                f"climate.json: {iso}/{year}/{ssp}/{field} is null but tier is {tier}"
+                            )
+                        continue
                     if not isinstance(val, (int, float)):
                         errors.append(f"climate.json: {iso}/{year}/{ssp}/{field} not numeric: {val}")
                         continue
@@ -119,11 +126,13 @@ def validate_climate(errors: list, warnings: list) -> bool:
                             f"out of expected range [{lo}, {hi}]"
                         )
 
-                # Flag sparse coverage
-                conf = record.get("confidence", 1.0)
-                if conf < SPARSE_THRESHOLD:
+                # Flag sparse coverage (skip if already set by fetcher)
+                conf = record.get("confidence")
+                if conf is None:
+                    if tier != "sparse":
+                        record["coverage_tier"] = "sparse"
+                elif conf < SPARSE_THRESHOLD:
                     sparse_isos.append(f"{iso}/{year}/{ssp} (confidence={conf:.2f})")
-                    # Mark in the data so the simulator UI can surface this
                     data[iso][str(year)][ssp]["coverage_tier"] = "sparse"
                 elif conf < 0.6:
                     data[iso][str(year)][ssp]["coverage_tier"] = "low"

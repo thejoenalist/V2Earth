@@ -1,36 +1,44 @@
 /**
  * Earth Simulator V2 — main entry point.
  *
- * Responsibilities:
- *  1. Boot core modules (EventBus is a singleton, no init needed)
- *  2. Initialize GlobeRenderer
- *  3. Wire TimeController → chapter timeline UI
- *  4. Wire SSP toggle UI
- *  5. Dismiss onboarding
- *  6. Bootstrap is deliberately thin — heavy work belongs in modules
+ * Thin orchestrator: boots core modules, wires timeline + SSP UI to TimeController,
+ * and syncs globe aesthetic on time:changed.
  *
- * If main.js grows past ~150 lines, extract to a dedicated AppController.
+ * GlobeRenderer.init() is async (terrain loads before Viewer creation), so the
+ * boot sequence is wrapped in an async IIFE. Everything that needs globeRenderer.viewer
+ * runs inside that IIFE after await.
  */
+
+import 'cesium/Build/Cesium/Widgets/widgets.css';
 
 import { EventBus } from './core/EventBus.js';
 import { TimeController, CHAPTERS, CHAPTER_META } from './core/TimeController.js';
 import { GlobeRenderer } from './globe/GlobeRenderer.js';
+import { EventSimulator } from './simulation/EventSimulator.js';
+import { ChatInterface } from './chat/ChatInterface.js';
+import { TemperatureLayer } from './layers/TemperatureLayer.js';
 
-// ── Instantiate core ────────────────────────────────────────────────────────
+/** Session ID for telemetry — imported by TelemetryService in Milestone 5. */
+export let sessionId = crypto.randomUUID();
 
+// ── Non-globe modules boot synchronously ──────────────────────────────────────
 const timeController = new TimeController();
-window.__timeController = timeController; // Debug access only
 
-const globeRenderer = new GlobeRenderer(document.getElementById('cesium-container'));
-window.__globeRenderer = globeRenderer;
+// ── UI helpers (no globe dependency) ─────────────────────────────────────────
 
-// ── Onboarding ──────────────────────────────────────────────────────────────
+function updateActiveChapter(year) {
+  document.querySelectorAll('.chapter-stop').forEach((el) => {
+    el.classList.toggle('active', Number(el.dataset.year) === year);
+  });
 
-document.getElementById('onboarding-start')?.addEventListener('click', () => {
-  document.getElementById('onboarding')?.classList.add('hidden');
-});
+  const i = CHAPTERS.indexOf(year);
+  const pct = i >= 0 ? (i / (CHAPTERS.length - 1)) * 100 : 0;
+  const fill = document.getElementById('timeline-fill');
+  if (fill) fill.style.width = `${pct}%`;
 
-// ── Chapter timeline ────────────────────────────────────────────────────────
+  const label = document.getElementById('chapter-label');
+  if (label) label.textContent = CHAPTER_META[year]?.name ?? '';
+}
 
 function buildTimeline() {
   const track = document.getElementById('timeline-track');
@@ -40,11 +48,9 @@ function buildTimeline() {
 
   CHAPTERS.forEach((year, i) => {
     const meta = CHAPTER_META[year];
-    const pct = positions[i];
-
     const stop = document.createElement('div');
     stop.className = 'chapter-stop';
-    stop.style.left = `${pct}%`;
+    stop.style.left = `${positions[i]}%`;
     stop.dataset.year = String(year);
     stop.title = `${meta.name} — ${meta.description}`;
 
@@ -63,54 +69,79 @@ function buildTimeline() {
     stop.addEventListener('click', () => timeController.setChapter(year));
     track.appendChild(stop);
   });
-
-  // Mark first stop active
-  updateActiveChapter(2025);
 }
 
-function updateActiveChapter(year) {
-  document.querySelectorAll('.chapter-stop').forEach((el) => {
-    el.classList.toggle('active', Number(el.dataset.year) === year);
+function wireSSPToggle() {
+  document.querySelectorAll('[data-ssp]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('[data-ssp]').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      timeController.setSSP(btn.dataset.ssp);
+    });
   });
-
-  const i = CHAPTERS.indexOf(year);
-  const pct = i >= 0 ? (i / (CHAPTERS.length - 1)) * 100 : 0;
-  const fill = document.getElementById('timeline-fill');
-  if (fill) fill.style.width = `${pct}%`;
-
-  const label = document.getElementById('chapter-label');
-  if (label) label.textContent = CHAPTER_META[year]?.name ?? '';
 }
 
 buildTimeline();
+wireSSPToggle();
+updateActiveChapter(timeController.year);
 
-// ── SSP toggle ──────────────────────────────────────────────────────────────
+document.getElementById('onboarding-start')?.addEventListener('click', () => {
+  document.getElementById('onboarding')?.classList.add('hidden');
+});
 
-document.querySelectorAll('.ssp-btn').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.ssp-btn').forEach((b) => b.classList.remove('active'));
-    btn.classList.add('active');
-    timeController.setSSP(btn.dataset.ssp);
+// ── Async boot — waits for terrain before creating Viewer ────────────────────
+(async () => {
+  const globeRenderer = new GlobeRenderer('cesium-container');
+  await globeRenderer.init();   // terrain loads here; Viewer created inside
+
+  const eventSimulator = new EventSimulator({ globeRenderer, timeController });
+  const chatInterface = new ChatInterface({ timeController, sessionId });
+
+  /** @type {import('./globe/LayerContract.js').LayerContract | null} */
+  let activeDataLayer = null;
+
+  const temperatureLayer = new TemperatureLayer(globeRenderer.viewer);
+  temperatureLayer.load().then(() => {
+    const activeBtn = document.querySelector('.layer-btn.active');
+    if (activeBtn?.dataset.layer === 'temperature') {
+      temperatureLayer.show();
+      activeDataLayer = temperatureLayer;
+    }
+  }).catch((err) => console.error('[main] TemperatureLayer load failed:', err));
+
+  function wireLayerSelector() {
+    document.querySelectorAll('.layer-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.layer-btn').forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        if (activeDataLayer) {
+          activeDataLayer.hide();
+          activeDataLayer = null;
+        }
+
+        const layerId = btn.dataset.layer;
+        if (layerId === 'temperature') {
+          temperatureLayer.show();
+          activeDataLayer = temperatureLayer;
+        }
+
+        EventBus.emit('layer:changed', { layerId });
+      });
+    });
+  }
+
+  wireLayerSelector();
+
+  EventBus.on('time:changed', ({ year }) => {
+    updateActiveChapter(year);
+    globeRenderer.applyChapterAesthetic(year);
   });
+
+  globeRenderer.applyChapterAesthetic(timeController.year);
+  window.addEventListener('resize', () => globeRenderer.resize());
+
+  EventBus.emit('session:start', { sessionId });
+})().catch((err) => {
+  console.error('[main] Boot failed:', err);
 });
-
-// ── Layer selector ──────────────────────────────────────────────────────────
-
-document.querySelectorAll('.layer-btn').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.layer-btn').forEach((b) => b.classList.remove('active'));
-    btn.classList.add('active');
-    EventBus.emit('layer:changed', { layerId: btn.dataset.layer });
-  });
-});
-
-// ── EventBus listeners ──────────────────────────────────────────────────────
-
-EventBus.on('time:changed', ({ year }) => {
-  updateActiveChapter(year);
-  globeRenderer.applyChapterAesthetic(year);
-});
-
-// ── Resize ──────────────────────────────────────────────────────────────────
-
-window.addEventListener('resize', () => globeRenderer.resize());

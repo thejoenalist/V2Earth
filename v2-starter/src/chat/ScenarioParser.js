@@ -1,80 +1,159 @@
 /**
  * ScenarioParser — converts user natural language to SimulationCommand.
  *
- * Calls Claude API (claude-haiku-4-5 for speed and cost).
- * Returns a SimulationCommand that the EventSimulator and NarrativeEngine consume.
+ * Calls the Supabase Edge Function proxy (never the Anthropic API directly).
  */
 
-import { createCommand, SCENARIO_PARSER_SYSTEM_PROMPT } from './SimulationCommand.js';
+import { createCommand, EVENT_TYPES } from './SimulationCommand.js';
 import { normalizeISO } from '../core/ISONormalizer.js';
+import { getCentroid, SAHEL_CENTROID } from '../globe/RegionCentroids.js';
+import { getSupabaseOrigin } from '../core/supabaseClient.js';
 
-const API_KEY = import.meta.env.VITE_CLAUDE_API_KEY ?? null;
-const API_URL = 'https://api.anthropic.com/v1/messages';
+const SUPABASE_URL = getSupabaseOrigin(import.meta.env.VITE_SUPABASE_URL ?? '');
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY ?? '';
+
+const VALID_TYPES = Object.freeze([
+  'climate_event',
+  'scenario_compare',
+  'region_inspect',
+  'timeline_jump',
+  'local_action',
+  'research_query',
+  'resilience_plan',
+  'explain',
+  'empowerment_quiz',
+]);
+
+const SAHEL_ISOS = new Set(['NER', 'MLI', 'BFA', 'TCD', 'MRT', 'SEN', 'SDN', 'ETH', 'GMB', 'GIN', 'CMR']);
 
 export class ScenarioParser {
-  /**
-   * Parse a user query into a SimulationCommand.
-   * @param {string} userText
-   * @param {{ year: number, ssp: string }} currentContext - Current globe state
-   * @returns {Promise<import('./SimulationCommand.js').SimulationCommand>}
-   */
+  constructor() {
+    this._history = [];
+  }
+
   async parse(userText, currentContext) {
-    if (!API_KEY) {
-      console.warn('[ScenarioParser] No VITE_CLAUDE_API_KEY — returning stub command');
-      return this._stubCommand(userText);
+    if (!SUPABASE_URL) {
+      return this._devStub();
     }
 
-    const contextHint = `Current globe state: year=${currentContext.year}, pathway=${currentContext.ssp}`;
+    const historyForRequest = this._history.slice(-10);
+    this._history.push({ role: 'user', content: userText });
+    if (this._history.length > 10) {
+      this._history = this._history.slice(-10);
+    }
 
-    const response = await fetch(API_URL, {
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/parse-scenario`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': API_KEY,
-        'anthropic-version': '2023-06-01',
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 512,
-        system: SCENARIO_PARSER_SYSTEM_PROMPT,
-        messages: [
-          { role: 'user', content: `${contextHint}\n\nUser query: "${userText}"` }
-        ],
+        query: userText,
+        year: currentContext.year,
+        ssp: currentContext.ssp,
+        history: historyForRequest,
       }),
     });
 
+    const data = await response.json().catch(() => ({}));
+
     if (!response.ok) {
-      throw new Error(`[ScenarioParser] Claude API error: ${response.status}`);
+      throw new Error(data.error ?? `[ScenarioParser] Edge function error: ${response.status}`);
     }
 
-    const data = await response.json();
-    const raw = data.content?.[0]?.text ?? '{}';
-
-    let parsed;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      throw new Error(`[ScenarioParser] Could not parse Claude response as JSON: ${raw}`);
+    if (data.error) {
+      throw new Error(data.error);
     }
 
-    // Normalize ISO if present
-    if (parsed.target) {
-      parsed.target = normalizeISO(parsed.target) ?? parsed.target;
+    const command = this._validate(data);
+
+    if (command.target) {
+      command.target = normalizeISO(command.target) ?? command.target;
     }
 
-    return createCommand(parsed);
+    this._history.push({ role: 'assistant', content: JSON.stringify(command) });
+    if (this._history.length > 10) {
+      this._history = this._history.slice(-10);
+    }
+
+    return createCommand(command);
   }
 
-  /** Fallback when no API key is configured. */
-  _stubCommand(text) {
+  _validate(cmd) {
+    if (!cmd || typeof cmd !== 'object') {
+      throw new Error('[ScenarioParser] Invalid command: not an object');
+    }
+
+    const raw = cmd;
+
+    if (!VALID_TYPES.includes(raw.type)) {
+      throw new Error(`[ScenarioParser] Invalid command type: ${raw.type}`);
+    }
+
+    raw.params = raw.params && typeof raw.params === 'object'
+      ? { ...raw.params }
+      : {};
+
+    const eventType = raw.params.eventType ?? raw.event ?? null;
+    if (eventType && typeof eventType === 'string' && eventType in EVENT_TYPES) {
+      raw.event = eventType;
+      raw.params.eventType = eventType;
+    } else {
+      raw.event = null;
+      raw.params.eventType = null;
+    }
+
+    if (typeof raw.params.year === 'number') {
+      raw.params.year = Math.max(2025, Math.min(2100, raw.params.year));
+    }
+
+    if (!raw.narrative || typeof raw.narrative !== 'object') {
+      raw.narrative = {};
+    }
+
+    const narrative = raw.narrative;
+    narrative.learned = typeof narrative.learned === 'string' ? narrative.learned : '';
+    narrative.action = typeof narrative.action === 'string' ? narrative.action : '';
+    narrative.emotion = typeof narrative.emotion === 'string' ? narrative.emotion : '';
+    narrative.sources = Array.isArray(narrative.sources) ? narrative.sources : [];
+
+    if (raw.type === 'climate_event' && raw.params.eventType) {
+      this._attachCenter(raw);
+    }
+
+    return raw;
+  }
+
+  _attachCenter(cmd) {
+    const params = cmd.params;
+    if (params.center && typeof params.center === 'object') return;
+
+    const target = typeof cmd.target === 'string' ? cmd.target : null;
+    let centroid = target ? getCentroid(target) : null;
+
+    if (!centroid && target && SAHEL_ISOS.has(target)) {
+      centroid = SAHEL_CENTROID;
+    }
+
+    if (!centroid && !target && cmd.params?.eventType === 'drought') {
+      centroid = SAHEL_CENTROID;
+    }
+
+    if (centroid) {
+      params.center = { lat: centroid.lat, lon: centroid.lon };
+    }
+  }
+
+  _devStub() {
     return createCommand({
       type: 'explain',
       target: null,
       event: null,
       params: {},
       narrative: {
-        learned: `You asked: "${text}". Configure VITE_CLAUDE_API_KEY to enable live scenario parsing.`,
-        action: 'Add your Claude API key to .env.local as VITE_CLAUDE_API_KEY.',
+        learned: '[Dev stub — no Supabase URL configured]',
+        action: '',
         emotion: '',
         sources: [],
       },
