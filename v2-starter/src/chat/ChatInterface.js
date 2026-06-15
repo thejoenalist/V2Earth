@@ -16,6 +16,16 @@
 import { EventBus } from '../core/EventBus.js';
 import { ScenarioParser } from './ScenarioParser.js';
 
+/** Escape user-supplied strings before injection into innerHTML. */
+function escapeHtml(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 export class ChatInterface {
   /**
    * @param {{ timeController: import('../core/TimeController.js').TimeController, sessionId?: string }} deps
@@ -35,6 +45,17 @@ export class ChatInterface {
     /** Active quiz state */
     this._activeQuiz     = null;   // { questions, answers: {} }
 
+    // Bound EventBus handlers — stored so destroy() can remove them
+    this._onStackChanged = ({ stack }) => {
+      if (this._ejectBtn) {
+        this._ejectBtn.style.display = stack.length > 0 ? 'flex' : 'none';
+      }
+    };
+    this._onEjected = () => {
+      if (this._ejectBtn) this._ejectBtn.style.display = 'none';
+    };
+    this._onCompound = ({ compound }) => this._renderCompoundAlert(compound);
+
     this._wire();
   }
 
@@ -53,21 +74,15 @@ export class ChatInterface {
       if (this._ejectBtn) this._ejectBtn.style.display = 'none';
     });
 
-    // Show/hide eject button based on simulation stack depth
-    EventBus.on('simulation:stack_changed', ({ stack }) => {
-      if (this._ejectBtn) {
-        this._ejectBtn.style.display = stack.length > 0 ? 'flex' : 'none';
-      }
-    });
+    EventBus.on('simulation:stack_changed',    this._onStackChanged);
+    EventBus.on('simulation:ejected',          this._onEjected);
+    EventBus.on('simulation:compound_detected', this._onCompound);
+  }
 
-    EventBus.on('simulation:ejected', () => {
-      if (this._ejectBtn) this._ejectBtn.style.display = 'none';
-    });
-
-    // Compound event alert from EventSimulator
-    EventBus.on('simulation:compound_detected', ({ compound }) => {
-      this._renderCompoundAlert(compound);
-    });
+  destroy() {
+    EventBus.off('simulation:stack_changed',    this._onStackChanged);
+    EventBus.off('simulation:ejected',          this._onEjected);
+    EventBus.off('simulation:compound_detected', this._onCompound);
   }
 
   // ── Submit ────────────────────────────────────────────────────────────────
@@ -336,25 +351,27 @@ export class ChatInterface {
 
     const metricsHtml = (report.metrics ?? []).map(m =>
       `<div style="margin:6px 0; padding:8px 10px; background:rgba(255,255,255,0.04); border-radius:6px;">
-        <span style="color:#7ec8e3">${m.label}:</span>
-        <strong style="color:#d0e8f5"> ${m.value}</strong>
-        <div style="font-size:11px; color:#5a8a9a; margin-top:2px">${m.basis}</div>
+        <span style="color:#7ec8e3">${escapeHtml(m.label)}:</span>
+        <strong style="color:#d0e8f5"> ${escapeHtml(m.value)}</strong>
+        <div style="font-size:11px; color:#5a8a9a; margin-top:2px">${escapeHtml(m.basis)}</div>
       </div>`
     ).join('');
 
     const stepsHtml = (report.nextSteps ?? []).map((s, i) =>
-      `<div style="margin:4px 0">${i + 1}. ${s}</div>`
+      `<div style="margin:4px 0">${i + 1}. ${escapeHtml(s)}</div>`
     ).join('');
 
+    // grade and color come from the local gradeColors lookup — safe to interpolate directly.
+    // All API-origin strings (gradeLabel, keyInsight, metrics, nextSteps) are escaped.
     card.innerHTML = `
       <div style="display:flex; align-items:center; gap:14px; margin-bottom:14px;">
         <div style="font-size:42px; font-weight:700; color:${color}; line-height:1">${report.grade}</div>
         <div>
-          <div style="font-size:15px; font-weight:600; color:${color}">${report.gradeLabel}</div>
+          <div style="font-size:15px; font-weight:600; color:${color}">${escapeHtml(report.gradeLabel)}</div>
           <div style="font-size:11px; color:#5a8a9a; margin-top:2px">Climate Hazard Readiness Report</div>
         </div>
       </div>
-      <div style="margin-bottom:14px; font-size:13px; color:#a8d8f0; line-height:1.55">${report.keyInsight}</div>
+      <div style="margin-bottom:14px; font-size:13px; color:#a8d8f0; line-height:1.55">${escapeHtml(report.keyInsight)}</div>
       <div style="margin-bottom:14px">${metricsHtml}</div>
       <div style="margin-bottom:14px; color:#d0e8f5">
         <div style="font-size:11px; color:#5a8a9a; margin-bottom:6px; text-transform:uppercase; letter-spacing:.06em">Next Steps</div>

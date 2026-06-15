@@ -60,6 +60,13 @@ function makeCircleCanvas(innerColor, outerColor = 'transparent', size = 64) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Module-level particle texture canvases — created once, reused every simulation
+// ─────────────────────────────────────────────────────────────────────────────
+const _FIRE_CANVAS  = makeCircleCanvas('#ff6a00', 'rgba(255,30,0,0)');
+const _SMOKE_CANVAS = makeCircleCanvas('rgba(75,75,75,0.9)', 'rgba(40,40,40,0)');
+const _EMBER_CANVAS = makeCircleCanvas('#ffcc00', 'rgba(255,80,0,0)', 32);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // ActiveSimulation
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -133,13 +140,11 @@ export class ActiveSimulation {
     return obj;
   }
 
-  /** Register a postRender listener and track its removal */
+  /** Register a postRender listener and track its removal.
+   *  Cesium.Event.addEventListener returns void — removal is via removeEventListener. */
   _addPostRenderListener(fn) {
-    // Cesium.Event.addEventListener returns a removeEventListener function
-    const remove = this.viewer.scene.postRender.addEventListener(fn);
-    this._listeners.push(typeof remove === 'function'
-      ? remove
-      : () => this.viewer.scene.postRender.removeEventListener(fn));
+    this._listeners.push(() => this.viewer.scene.postRender.removeEventListener(fn));
+    this.viewer.scene.postRender.addEventListener(fn);
   }
 
   /** Elapsed seconds since simulation started */
@@ -420,9 +425,9 @@ export class ActiveSimulation {
     const { lon, lat } = this._getCenter();
     const mag = Math.max(1, Math.min(10, this.command.params?.magnitude ?? 5));
 
-    const fireCanvas  = makeCircleCanvas('#ff6a00', 'rgba(255,30,0,0)');
-    const smokeCanvas = makeCircleCanvas('rgba(75,75,75,0.9)', 'rgba(40,40,40,0)');
-    const emberCanvas = makeCircleCanvas('#ffcc00', 'rgba(255,80,0,0)', 32);
+    const fireCanvas  = _FIRE_CANVAS;
+    const smokeCanvas = _SMOKE_CANVAS;
+    const emberCanvas = _EMBER_CANVAS;
 
     const fireR      = 30_000 + mag * 12_000;
     const rate       = 6 + mag * 3;

@@ -35,6 +35,31 @@ const EVENT_TYPES = new Set([
   "ice_sheet_collapse", "amoc_slowdown", "sinkhole", "crop_failure", "solar_storm",
 ]);
 
+// ── Rate limiter ─────────────────────────────────────────────────────────────
+// In-memory per-IP limit: 10 requests per 60-second window.
+// Resets automatically; stale entries cleaned on each request.
+const RATE_LIMIT_MAX      = 10;
+const RATE_LIMIT_WINDOW   = 60_000; // ms
+const _rateLimitStore     = new Map<string, { count: number; resetAt: number }>();
+
+function checkRateLimit(ip: string): boolean {
+  const now = Date.now();
+
+  // Purge expired entries
+  for (const [key, entry] of _rateLimitStore) {
+    if (entry.resetAt < now) _rateLimitStore.delete(key);
+  }
+
+  const entry = _rateLimitStore.get(ip);
+  if (!entry || entry.resetAt < now) {
+    _rateLimitStore.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW });
+    return true; // allowed
+  }
+  if (entry.count >= RATE_LIMIT_MAX) return false; // blocked
+  entry.count++;
+  return true; // allowed
+}
+
 const SCENARIO_PARSER_SYSTEM_PROMPT = `
 You are the scenario parser for an Earth Simulator. Convert the user's question into a structured SimulationCommand JSON object.
 
@@ -326,6 +351,12 @@ Deno.serve(async (req: Request) => {
 
   if (req.method !== "POST") {
     return jsonResponse({ error: "Method not allowed" }, 405);
+  }
+
+  // Rate limit check
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? "unknown";
+  if (!checkRateLimit(ip)) {
+    return jsonResponse({ error: "Rate limit exceeded. Please wait a moment and try again." }, 429);
   }
 
   try {

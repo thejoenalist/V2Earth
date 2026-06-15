@@ -151,6 +151,9 @@ export class EventSimulator {
   _clearStack(reason = 'unknown') {
     for (const sim of this._stack) this._destroySim(sim);
     this._stack = [];
+    // Safety net: force-reset animation counter so requestRenderMode can never
+    // get stuck off if a sim crashed before calling endAnimation.
+    this._renderer.resetAnimationCount?.();
     this._emitStackChanged();
     EventBus.emit('simulation:ejected', { reason });
   }

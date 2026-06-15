@@ -1,4 +1,5 @@
 import * as Cesium from 'cesium';
+import { getCentroid } from './RegionCentroids.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Imagery providers
@@ -201,18 +202,20 @@ export class GlobeRenderer {
     this._baseLayer = this.viewer.imageryLayers.addImageryProvider(createBlueMarbleProvider());
 
     // Layer 1: Black Marble (city lights).
-    // Black Marble tiles are mostly black — city lights are bright dots/clusters.
-    // colorToAlpha makes the near-black areas fully transparent so only the
-    // bright city light pixels float on top of Blue Marble.
-    // On the day side the lights are dim relative to the sunlit Blue Marble.
-    // On the night side (globe.enableLighting darkens it) the bright city lights
-    // stand out clearly — this is the natural CesiumJS night-lights effect.
-    this._nightLayer = this.viewer.imageryLayers.addImageryProvider(createBlackMarbleProvider());
-    this._nightLayer.alpha                  = 1.0;
-    this._nightLayer.brightness             = 3.0;    // amplify city light pixels
-    this._nightLayer.contrast               = 2.0;    // punch whites, deepen blacks
-    this._nightLayer.colorToAlpha           = new Cesium.Color(0, 0, 0, 1); // black → transparent
-    this._nightLayer.colorToAlphaThreshold  = 0.1;   // anything darker than ~10% brightness is transparent
+    // colorToAlpha makes near-black pixels transparent so only city lights show.
+    // Wrapped in try/catch — GIBS tile 400s are non-fatal; the app works fine
+    // with ESRI + Blue Marble if this layer is unavailable.
+    try {
+      this._nightLayer = this.viewer.imageryLayers.addImageryProvider(createBlackMarbleProvider());
+      this._nightLayer.alpha                  = 1.0;
+      this._nightLayer.brightness             = 3.0;
+      this._nightLayer.contrast               = 2.0;
+      this._nightLayer.colorToAlpha           = new Cesium.Color(0, 0, 0, 1);
+      this._nightLayer.colorToAlphaThreshold  = 0.1;
+    } catch (e) {
+      console.warn('[GlobeRenderer] Black Marble layer unavailable, skipping:', e.message);
+      this._nightLayer = null;
+    }
 
     // Fade Blue Marble / night lights as the camera moves in so ESRI detail shows through
     this._chapterNightAlpha = 1.0;
@@ -397,6 +400,20 @@ export class GlobeRenderer {
     this._activeAnimationCount = Math.max(0, this._activeAnimationCount - 1);
     if (this._activeAnimationCount === 0 && this._scene) {
       this._scene.requestRenderMode = true;
+      this._scene.requestRender(); // flush one final frame
+    }
+  }
+
+  /**
+   * Safety reset — force-clears the animation counter and re-enables idle
+   * render mode. Call after clearing the entire simulation stack to guarantee
+   * the counter can never get stuck positive.
+   */
+  resetAnimationCount() {
+    this._activeAnimationCount = 0;
+    if (this._scene) {
+      this._scene.requestRenderMode = true;
+      this._scene.requestRender();
     }
   }
 
@@ -453,7 +470,17 @@ export class GlobeRenderer {
   }
 
   flyToISO(iso) {
-    console.log('[GlobeRenderer] flyToISO not yet implemented for', iso);
+    if (!this.viewer) return;
+    const c = getCentroid(iso);
+    if (!c) {
+      console.warn('[GlobeRenderer] flyToISO: no centroid for', iso);
+      return;
+    }
+    this.viewer.camera.flyTo({
+      destination: Cesium.Cartesian3.fromDegrees(c.lon, c.lat, 1_800_000),
+      duration: 1.8,
+      easingFunction: Cesium.EasingFunction.CUBIC_IN_OUT,
+    });
   }
 
   destroy() {

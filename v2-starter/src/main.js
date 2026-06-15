@@ -17,6 +17,7 @@ import { GlobeRenderer } from './globe/GlobeRenderer.js';
 import { EventSimulator } from './simulation/EventSimulator.js';
 import { ChatInterface } from './chat/ChatInterface.js';
 import { TemperatureLayer } from './layers/TemperatureLayer.js';
+import { TelemetryService } from './analytics/TelemetryService.js';
 
 /** Session ID for telemetry — imported by TelemetryService in Milestone 5. */
 export let sessionId = crypto.randomUUID();
@@ -96,6 +97,14 @@ document.getElementById('onboarding-start')?.addEventListener('click', () => {
 
   const eventSimulator = new EventSimulator({ globeRenderer, timeController });
   const chatInterface = new ChatInterface({ timeController, sessionId });
+
+  // TelemetryService wires its own EventBus listeners internally.
+  // Wrapped in try/catch so a Supabase config error never blocks globe boot.
+  try {
+    new TelemetryService();
+  } catch (err) {
+    console.warn('[main] TelemetryService failed to initialize:', err.message);
+  }
 
   /** @type {import('./globe/LayerContract.js').LayerContract | null} */
   let activeDataLayer = null;
