@@ -1,0 +1,12 @@
+# Supabase CLI project config.
+# project_id matches VITE_SUPABASE_URL in .env.local (https://silryqzempbblleqaokv.supabase.co).
+#
+# This file lets `supabase` CLI commands run without re-specifying --project-ref
+# every time, once you've run `npx supabase login` and `npx supabase link --project-ref silryqzempbblleqaokv`.
+
+project_id = "silryqzempbblleqaokv"
+
+[functions.parse-scenario]
+# Anon-key JWT verification stays ON (default) — ScenarioParser.js sends
+# `Authorization: Bearer ${VITE_SUPABASE_ANON_KEY}`, which satisfies it.
+verify_jwt = true
