@@ -58,12 +58,14 @@ export const EventBus = {
  * Update this list as new events are added.
  *
  * time:changed         { year: number, ssp: string }
- * region:selected      { iso: string, screenX: number, screenY: number }
+ * region:selected      { iso: string, name: string|null, coords: {lat,lon}|null }
  * region:hovered       { iso: string | null }
+ * region:cleared       {}  — CountryPanel closed; RegionPicker drops highlight
  * layer:changed        { layerId: string }
  * ssp:changed          { ssp: string }
  * simulation:requested SimulationCommand (see SimulationCommand.js)
  * simulation:complete  { commandId: string }
  * chat:query           { text: string, sessionId: string }
  * session:start        { sessionId: string }
+ * report:export_requested  { type: string, report: object, context?: object }  → ExportService
  */

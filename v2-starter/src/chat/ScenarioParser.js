@@ -1,7 +1,8 @@
 /**
  * ScenarioParser — converts user natural language to SimulationCommand.
  *
- * Calls the Supabase Edge Function proxy (never the Anthropic API directly).
+ * Production: Supabase Edge Function proxy (never the Anthropic API directly).
+ * Development: tries local Vite proxy (/api/parse-scenario) first when available.
  */
 
 import { createCommand, EVENT_TYPES } from './SimulationCommand.js';
@@ -11,6 +12,7 @@ import { getSupabaseOrigin } from '../core/supabaseClient.js';
 
 const SUPABASE_URL = getSupabaseOrigin(import.meta.env.VITE_SUPABASE_URL ?? '');
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY ?? '';
+const LOCAL_PARSE_URL = '/api/parse-scenario';
 
 const VALID_TYPES = Object.freeze([
   'climate_event',
@@ -32,52 +34,85 @@ export class ScenarioParser {
   }
 
   async parse(userText, currentContext) {
-    if (!SUPABASE_URL) {
-      return this._devStub();
-    }
-
+    // History is only committed after a successful parse (see below).
+    // Committing the user turn up-front left a dangling user message on
+    // failure, producing consecutive user roles on the next request —
+    // which the Anthropic API rejects, bricking chat for the session.
     const historyForRequest = this._history.slice(-10);
-    this._history.push({ role: 'user', content: userText });
-    if (this._history.length > 10) {
-      this._history = this._history.slice(-10);
+
+    const payload = {
+      query: userText,
+      year: currentContext.year,
+      ssp: currentContext.ssp,
+      history: historyForRequest,
+    };
+
+    let command;
+    let lastError = null;
+
+    if (import.meta.env.DEV) {
+      try {
+        command = await this._requestParse(LOCAL_PARSE_URL, payload);
+      } catch (err) {
+        lastError = err;
+      }
     }
 
-    const response = await fetch(`${SUPABASE_URL}/functions/v1/parse-scenario`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-      },
-      body: JSON.stringify({
-        query: userText,
-        year: currentContext.year,
-        ssp: currentContext.ssp,
-        history: historyForRequest,
-      }),
-    });
-
-    const data = await response.json().catch(() => ({}));
-
-    if (!response.ok) {
-      throw new Error(data.error ?? `[ScenarioParser] Edge function error: ${response.status}`);
+    if (!command && SUPABASE_URL) {
+      try {
+        command = await this._requestParse(
+          `${SUPABASE_URL}/functions/v1/parse-scenario`,
+          payload,
+          {
+            Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+          },
+        );
+      } catch (err) {
+        lastError = err;
+      }
     }
 
-    if (data.error) {
-      throw new Error(data.error);
+    if (!command) {
+      if (!SUPABASE_URL && !import.meta.env.DEV) {
+        return this._devStub();
+      }
+      throw lastError ?? new Error('No scenario parser available');
     }
-
-    const command = this._validate(data);
 
     if (command.target) {
       command.target = normalizeISO(command.target) ?? command.target;
     }
 
+    this._history.push({ role: 'user', content: userText });
     this._history.push({ role: 'assistant', content: JSON.stringify(command) });
     if (this._history.length > 10) {
       this._history = this._history.slice(-10);
     }
 
     return createCommand(command);
+  }
+
+  async _requestParse(url, payload, extraHeaders = {}) {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...extraHeaders,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(data.error ?? `[ScenarioParser] Parser error: ${response.status}`);
+    }
+
+    if (data.error) {
+      throw new Error(data.error);
+    }
+
+    return this._validate(data);
   }
 
   _validate(cmd) {
@@ -96,7 +131,7 @@ export class ScenarioParser {
       : {};
 
     const eventType = raw.params.eventType ?? raw.event ?? null;
-    if (eventType && typeof eventType === 'string' && eventType in EVENT_TYPES) {
+    if (eventType && typeof eventType === 'string' && Object.hasOwn(EVENT_TYPES, eventType)) {
       raw.event = eventType;
       raw.params.eventType = eventType;
     } else {

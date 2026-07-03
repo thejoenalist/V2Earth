@@ -10,37 +10,16 @@
  */
 
 import { EVENT_TYPES } from '../chat/SimulationCommand.js';
+import { EventBus } from '../core/EventBus.js';
+import { getCentroid } from '../globe/RegionCentroids.js';
 import * as Cesium from 'cesium';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Country centroid lookup  [lon, lat] decimal degrees
-// Used as fallback when command.params.center is absent.
-// ─────────────────────────────────────────────────────────────────────────────
-const CENTROIDS = {
-  AFG: [67.71, 33.93],  AGO: [17.87, -11.20], ARG: [-63.62, -38.42],
-  AUS: [133.78, -25.27], AUT: [14.55, 47.52],  BGD: [90.36, 23.68],
-  BEL: [4.47, 50.50],   BRA: [-51.93, -14.24], CAN: [-96.82, 56.13],
-  CHE: [8.23, 46.82],   CHL: [-71.54, -35.68], CHN: [104.20, 35.86],
-  COD: [23.65, -2.88],  COL: [-74.30, 4.57],   DEU: [10.45, 51.17],
-  DZA: [1.66, 28.03],   EGY: [30.80, 26.82],   ESP: [-3.75, 40.46],
-  ETH: [40.49, 9.15],   FRA: [2.21, 46.23],    GBR: [-3.44, 55.38],
-  GHA: [-1.02, 7.95],   GTM: [-90.23, 15.78],  IDN: [113.92, -0.79],
-  IND: [78.96, 20.59],  IRN: [53.69, 32.43],   IRQ: [43.68, 33.22],
-  ITA: [12.57, 41.87],  JPN: [138.25, 36.20],  KAZ: [66.92, 48.02],
-  KEN: [37.91, 0.02],   KOR: [127.77, 35.91],  LBY: [17.23, 26.34],
-  MAR: [-7.09, 31.79],  MEX: [-102.55, 23.95], MOZ: [35.00, -18.67],
-  MYS: [109.70, 4.21],  NGA: [8.68, 9.08],     NOR: [8.47, 60.47],
-  NPL: [84.12, 28.39],  NZL: [174.89, -40.90], PAK: [69.35, 30.38],
-  PER: [-75.02, -9.19], PHL: [121.77, 12.88],  POL: [19.15, 51.92],
-  PRK: [127.51, 40.34], PRT: [-8.22, 39.40],   ROU: [24.97, 45.94],
-  RUS: [105.32, 61.52], SAU: [45.08, 23.89],   SDN: [29.94, 12.86],
-  SEN: [-14.45, 14.50], SOM: [45.34, 6.00],    SWE: [18.64, 60.13],
-  SYR: [38.30, 34.80],  THA: [100.99, 15.87],  TUR: [35.24, 38.96],
-  TZA: [34.89, -6.37],  UKR: [31.17, 48.38],   URY: [-55.77, -32.52],
-  USA: [-98.58, 39.83], UZB: [63.95, 41.38],   VEN: [-66.59, 6.42],
-  VNM: [108.28, 14.06], YEM: [48.52, 15.55],   ZAF: [25.08, -29.00],
-  ZMB: [27.85, -13.13], ZWE: [29.15, -19.02],
-};
+/**
+ * Natural lifetime of a simulation in milliseconds. After this, the sim
+ * emits `simulation:complete` and EventSimulator winds it down — keeps the
+ * globe clean and lets requestRenderMode re-idle the GPU.
+ */
+export const SIMULATION_LIFETIME_MS = 60_000;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Canvas helpers for particle textures
@@ -88,6 +67,7 @@ export class ActiveSimulation {
     this._started   = false;
     this._destroyed = false;
     this._animStart = null;
+    this._lifetimeTimer = null;
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -100,11 +80,27 @@ export class ActiveSimulation {
     const meta     = this.eventType ? EVENT_TYPES[this.eventType] : null;
     const strategy = meta?.render ?? 'placeholder';
     await this._dispatch(strategy);
+
+    // Natural end: after the lifetime elapses, announce completion.
+    // EventSimulator owns the stack, so it (not this class) performs the
+    // actual teardown in response to this event.
+    this._lifetimeTimer = setTimeout(() => {
+      if (this._destroyed) return;
+      EventBus.emit('simulation:complete', {
+        commandId: this.command.id,
+        eventType: this.eventType,
+      });
+    }, SIMULATION_LIFETIME_MS);
   }
 
   destroy() {
     if (this._destroyed) return;
     this._destroyed = true;
+
+    if (this._lifetimeTimer) {
+      clearTimeout(this._lifetimeTimer);
+      this._lifetimeTimer = null;
+    }
 
     // Remove postRender listeners before touching owned objects
     for (const remove of this._listeners) {
@@ -152,15 +148,15 @@ export class ActiveSimulation {
     return (Date.now() - this._animStart) / 1000;
   }
 
-  /** Resolve event center: params.center → centroid lookup → Atlantic fallback */
+  /** Resolve event center: params.center → RegionCentroids lookup → Atlantic fallback */
   _getCenter() {
     const p = this.command.params;
     if (p?.center?.lon != null && p?.center?.lat != null) {
       return { lon: p.center.lon, lat: p.center.lat };
     }
-    const iso = this.command.target;
-    if (iso && CENTROIDS[iso]) {
-      return { lon: CENTROIDS[iso][0], lat: CENTROIDS[iso][1] };
+    const centroid = getCentroid(this.command.target);
+    if (centroid) {
+      return { lon: centroid.lon, lat: centroid.lat };
     }
     return { lon: -25, lat: 20 };
   }

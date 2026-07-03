@@ -78,3 +78,29 @@ export function normalizeISO(input) {
   // Lookup handles alpha-2 and aliases
   return LOOKUP[clean] ?? null;
 }
+
+// Inverted map (alpha-3 → alpha-2) built once from the 2-letter entries above.
+// Aliases (UK, ENGLAND, …) are excluded so the first true alpha-2 wins.
+/** @type {Record<string, string>} */
+const ALPHA3_TO_ALPHA2 = {};
+for (const [k, v] of Object.entries(LOOKUP)) {
+  if (k.length === 2 && !(v in ALPHA3_TO_ALPHA2)) ALPHA3_TO_ALPHA2[v] = k;
+}
+
+/**
+ * Human-readable English country name for any ISO input.
+ * Uses Intl.DisplayNames; falls back to the alpha-3 code.
+ * @param {string | null | undefined} input
+ * @returns {string | null} display name, or null if the code is unresolvable
+ */
+export function isoDisplayName(input) {
+  const a3 = normalizeISO(input);
+  if (!a3) return null;
+  const a2 = ALPHA3_TO_ALPHA2[a3];
+  if (a2 && typeof Intl !== 'undefined' && Intl.DisplayNames) {
+    try {
+      return new Intl.DisplayNames(['en'], { type: 'region' }).of(a2) ?? a3;
+    } catch { /* fall through */ }
+  }
+  return a3;
+}

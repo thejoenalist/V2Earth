@@ -79,10 +79,9 @@ function getClientIp(req) {
 
 // ── System prompt (auto-generated — run `npm run sync-prompt`, do not hand-edit) ──
 // SYNC:PROMPT:START
-const SCENARIO_PARSER_SYSTEM_PROMPT = `
-You are the scenario parser for an Earth Simulator. Convert the user's question into a structured SimulationCommand JSON object.
+const SCENARIO_PARSER_SYSTEM_PROMPT = `You are the scenario parser for an Earth Simulator. Convert the user's question into a structured SimulationCommand JSON object.
 
-ALWAYS respond with valid JSON only — no markdown code fences, no commentary before or after. Choose the type that best fits the query:
+ALWAYS respond with valid JSON. Choose the type that best fits the query:
 
 --- TYPE: climate_event | scenario_compare | region_inspect | timeline_jump | explain ---
 {
@@ -91,10 +90,10 @@ ALWAYS respond with valid JSON only — no markdown code fences, no commentary b
   "event": "hurricane" | "sea_level_rise" | "wildfire" | "drought" | "heatwave" | "conflict" |
            "flood" | "tornado" | "tsunami" | "landslide" | "blizzard" | "dust_storm" |
            "coral_bleaching" | "glacial_recession" | "saltwater_intrusion" | "atmospheric_river" |
-           "earthquake" | "volcanic_eruption" | "storm_surge" | "epidemic_outbreak" | "locust_swarm" |
-           "harmful_algal_bloom" | "power_grid_failure" | "wildfire_smoke" | "infrastructure_cascade" |
            "permafrost_thaw" | "marine_heatwave" | "ocean_acidification" | "glacial_lake_outburst" |
            "compound_fire_weather" | "wet_bulb_exceedance" | "ice_sheet_collapse" | "amoc_slowdown" |
+           "earthquake" | "volcanic_eruption" | "storm_surge" | "epidemic_outbreak" | "locust_swarm" |
+           "harmful_algal_bloom" | "power_grid_failure" | "wildfire_smoke" | "infrastructure_cascade" |
            "sinkhole" | "crop_failure" | "solar_storm" | null,
   "params": { "magnitude": <number|null>, "unit": "<string|null>", "year": <number|null>, "ssp": "SSP2-4.5"|"SSP5-8.5"|null, "center": { "lon": <decimal degrees>, "lat": <decimal degrees> } },
 
@@ -214,6 +213,13 @@ Rules:
 - Always infer SSP from context; default to SSP2-4.5 for local_action (optimistic but achievable framing)
 - For year in local_action, add horizonYears to current year; default horizonYears to 25
 - Never fabricate statistics; cite source category (e.g., "NOAA LOCA2 regional projections") instead
+- For earthquake and volcanic_eruption: these are in scope, but always frame the climate connection
+  honestly (glacial isostatic rebound and deglaciation-driven crustal unloading can modulate seismicity
+  and eruption frequency; the events themselves are geological, not climate-driven).
+- For solar_storm: this is NOT a climate event and is outside the simulator's climate data scope.
+  Respond with an honest scope disclosure in "learned" — explain the geomagnetic mechanism and how it
+  differs from climate hazards, note any real interaction (e.g., grid stress compounding with
+  heat-driven demand), and still return the command with event: "solar_storm" so the globe can render it.
 
 --- EJECT DETECTION ---
 If the user's message signals they want to completely abandon the current scenario and start something
@@ -285,8 +291,7 @@ After quiz completion (all answers submitted), generate the report card as a fol
     },
     "sources": []
   }
-}
-`.trim();
+}`.trim();
 // SYNC:PROMPT:END
 
 function jsonResponse(body, status = 200) {
@@ -335,10 +340,18 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: '"query" is required and must be a string' }, 400);
   }
 
+  // Cost-abuse guardrails: cap query and history sizes so a hostile client
+  // can't pump arbitrarily large payloads through the paid API.
+  const MAX_QUERY_CHARS = 2_000;
+  const MAX_HISTORY_TURN_CHARS = 6_000; // assistant turns carry full JSON commands
+  if (query.length > MAX_QUERY_CHARS) {
+    return jsonResponse({ error: `"query" exceeds ${MAX_QUERY_CHARS} characters` }, 400);
+  }
+
   const safeHistory = Array.isArray(history) ? history.slice(-10) : [];
   const messages = safeHistory
     .filter((turn) => turn && (turn.role === 'user' || turn.role === 'assistant') && typeof turn.content === 'string')
-    .map((turn) => ({ role: turn.role, content: turn.content }));
+    .map((turn) => ({ role: turn.role, content: turn.content.slice(0, MAX_HISTORY_TURN_CHARS) }));
 
   messages.push({
     role: 'user',

@@ -123,7 +123,11 @@ export class ChatInterface {
 
     } catch (err) {
       loadingEl.remove();
-      this._addMessage('error', 'Could not process that scenario. Try again.');
+      const detail = err instanceof Error ? err.message : String(err);
+      const hint = import.meta.env.DEV
+        ? detail
+        : 'Could not process that scenario. Try again.';
+      this._addMessage('error', hint.startsWith('Could not') ? hint : `Could not process that scenario: ${detail}`);
       console.error('[ChatInterface]', err);
     }
 
@@ -141,12 +145,12 @@ export class ChatInterface {
 
     if (type === 'empowerment_quiz') {
       if (narrative.quiz)   this._renderQuiz(narrative.quiz);
-      if (narrative.report) this._renderReportCard(narrative.report);
+      if (narrative.report) this._renderReportCard(narrative.report, command);
       return;
     }
-    if (narrative.local)    { this._renderLocalAction(narrative);    return; }
-    if (narrative.plan)     { this._renderResiliencePlan(narrative); return; }
-    if (narrative.research) { this._renderResearchQuery(narrative);  return; }
+    if (narrative.local)    { this._renderLocalAction(narrative);            return; }
+    if (narrative.plan)     { this._renderResiliencePlan(narrative, command); return; }
+    if (narrative.research) { this._renderResearchQuery(narrative);          return; }
 
     // Default
     if (narrative.learned) this._addMessage('assistant', `📊 ${narrative.learned}`);
@@ -173,7 +177,7 @@ export class ChatInterface {
 
   // ── Render: resilience_plan ───────────────────────────────────────────────
 
-  _renderResiliencePlan({ plan, learned, sources }) {
+  _renderResiliencePlan({ plan, learned, sources }, command) {
     if (learned) this._addMessage('assistant', `📊 ${learned}`);
 
     if (plan.risks?.length) {
@@ -202,10 +206,52 @@ export class ChatInterface {
     if (plan.viability) this._addMessage('assistant', `✅ Viability: ${plan.viability.justification}`);
     if (sources?.length) this._addMessage('assistant', `Sources: ${sources.join(', ')}`);
 
-    // Auto-offer the quiz after a resilience plan
     if (plan.exportable) {
+      this._renderDownloadPrompt(plan, command);
+      // Auto-offer the quiz after a resilience plan
       setTimeout(() => this._offerQuiz(), 1200);
     }
+  }
+
+  // ── Render: "Download as Report" prompt (resilience_plan) ───────────────
+
+  _renderDownloadPrompt(plan, command) {
+    const el = this._createMessageEl('assistant');
+    el.style.background = 'rgba(74,168,232,0.1)';
+    el.style.borderColor = 'rgba(74,168,232,0.35)';
+    el.style.color = '#a8d8f0';
+
+    const btn = document.createElement('button');
+    btn.style.cssText = `
+      display:block; margin-top:10px; padding:8px 18px; border-radius:8px;
+      border:1px solid rgba(74,168,232,0.5); background:rgba(74,168,232,0.15);
+      color:#7ec8e3; cursor:pointer; font-size:13px;
+    `;
+    btn.textContent = '📄 Download as Report';
+    btn.addEventListener('click', () => {
+      EventBus.emit('report:export_requested', {
+        type: 'resilience_plan',
+        report: plan,
+        context: this._exportContext(command),
+      });
+    });
+
+    el.textContent = '🌱 This plan is ready to export.';
+    el.appendChild(btn);
+    this._messages?.appendChild(el);
+    this._messages?.scrollTo({ top: this._messages.scrollHeight, behavior: 'smooth' });
+  }
+
+  /** Build the location/time context object passed alongside an export request. */
+  _exportContext(command) {
+    const local = command?.params?.localContext;
+    return {
+      target: command?.target ?? null,
+      year:   command?.params?.year ?? null,
+      ssp:    command?.params?.ssp ?? null,
+      city:   local?.city ?? null,
+      region: local?.region ?? null,
+    };
   }
 
   // ── Render: research_query ────────────────────────────────────────────────
@@ -341,7 +387,7 @@ export class ChatInterface {
   // ── Render: report card ───────────────────────────────────────────────────
 
   /** @param {import('./SimulationCommand.js').EmpowermentReport} report */
-  _renderReportCard(report) {
+  _renderReportCard(report, command) {
     const gradeColors = { A: '#4ae88a', B: '#7ec8e3', C: '#ffd080', D: '#ff9a4a', F: '#e85a4a' };
     const color = gradeColors[report.grade] ?? '#d0e8f5';
 
@@ -361,11 +407,11 @@ export class ChatInterface {
       `<div style="margin:4px 0">${i + 1}. ${escapeHtml(s)}</div>`
     ).join('');
 
-    // grade and color come from the local gradeColors lookup — safe to interpolate directly.
-    // All API-origin strings (gradeLabel, keyInsight, metrics, nextSteps) are escaped.
+    // color comes from the local gradeColors lookup — safe to interpolate.
+    // ALL API-origin strings (grade, gradeLabel, keyInsight, metrics, nextSteps) are escaped.
     card.innerHTML = `
       <div style="display:flex; align-items:center; gap:14px; margin-bottom:14px;">
-        <div style="font-size:42px; font-weight:700; color:${color}; line-height:1">${report.grade}</div>
+        <div style="font-size:42px; font-weight:700; color:${color}; line-height:1">${escapeHtml(report.grade)}</div>
         <div>
           <div style="font-size:15px; font-weight:600; color:${color}">${escapeHtml(report.gradeLabel)}</div>
           <div style="font-size:11px; color:#5a8a9a; margin-top:2px">Climate Hazard Readiness Report</div>
@@ -384,7 +430,11 @@ export class ChatInterface {
     `;
 
     card.querySelector('.download-report-btn')?.addEventListener('click', () => {
-      EventBus.emit('report:export_requested', { type: 'empowerment_report', report });
+      EventBus.emit('report:export_requested', {
+        type: 'empowerment_report',
+        report,
+        context: this._exportContext(command),
+      });
     });
 
     this._messages?.appendChild(card);

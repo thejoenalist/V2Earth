@@ -83,7 +83,6 @@ These are non-negotiable rules. Never violate them.
 │   │   ├── ScenarioParser.js     Calls Supabase proxy → returns SimulationCommand
 │   │   └── ChatInterface.js      Chat UI — renders all response types, quiz, report card
 │   └── analytics/
-│       ├── WorldStateAnalytics.js  Ported from V1 — stateless analytics functions
 │       └── TelemetryService.js     Session story format, Supabase flush
 │
 ├── pipeline/
@@ -277,33 +276,51 @@ No manual deploy steps required.
 | Milestone | Status | Goal |
 |---|---|---|
 | M0 | ✅ Complete | Architecture, all stubs, CLAUDE.md |
-| M1 | 🔲 Not started | Working CesiumJS globe, chapter timeline, SSP toggle |
-| M2 | 🔲 Not started | Chat → SimulationCommand flow with API proxy |
-| M3 | 🔲 Not started | Real CMIP6 data in pipeline, temperature layer live |
-| M4 | 🔲 Not started | 6 "ready" event renders (hurricane, sea level, wildfire, drought, heatwave, conflict) |
-| M5 | 🔲 Not started | Telemetry + admin session viewer |
-| M6 | 🔲 Not started | Empowerment quiz + report card + PDF export |
+| M1 | ✅ Complete | Working CesiumJS globe, chapter timeline, SSP toggle |
+| M2 | ✅ Complete | Chat → SimulationCommand flow with API proxy (rolling 10-turn history included) |
+| M3 | ✅ Complete | Real CMIP6 data baked (246 countries, validated); Temperature/SeaLevel/Precipitation layers live |
+| M4 | ✅ Complete | All 6 "ready" event renders live in ActiveSimulation.js (hurricane, sea level, wildfire, drought, heatwave, conflict) |
+| M5 | 🔧 In progress | TelemetryService done; RLS policies + admin viewer auth unverified |
+| M6 | ✅ Complete | Quiz + report card + ExportService (HTML export, print-to-PDF ready) |
+
+**Note:** all app code lives in `v2-starter/` — the repo-structure paths above are relative to that directory.
 
 ---
 
 ## Open Action Items
 
-These are unresolved decisions or missing implementations at the time of repo creation:
+Updated 2026-07-03 after a full code audit.
 
-1. **Supabase Edge Function** (`supabase/functions/parse-scenario/index.ts`) — the API proxy. Must be written before any chat feature works in production.
-2. **Python pipeline fetchers** — `fetch_cmip6.py`, `fetch_worldbank.py`, `fetch_boundaries.py` do not yet exist. Only `bake_all.py` (orchestrator) and `validate.py` exist.
-3. **Baked JSON schema definition** — needs a formal schema doc before fetchers are written, so all fetchers write the same field names.
-4. **Layer implementations** — no actual `TemperatureLayer`, `SeaLevelLayer`, etc. exist yet. These are the core product.
-5. **Privacy policy + Terms of Service** — required before any public traffic. Even free public beta needs a privacy policy if telemetry is collecting session data.
-6. **Data source attribution UI** — `public/data/attribution.json` needs to be visible somewhere in the UI for CC BY 4.0 compliance.
-7. **Supabase RLS policies** — must be configured before telemetry goes live. anon key = INSERT only on sessions table.
-8. **Admin session viewer auth** — `admin/session_viewer.html` needs Supabase Auth gate before it's deployed.
-9. **CSP headers** — `netlify.toml` or `_headers` file with Content Security Policy.
-10. **Report PDF export** — `report:export_requested` event is emitted but no ExportService exists yet.
-11. **`#chat-eject-btn` in index.html** — the eject button referenced in ChatInterface.js needs to be added to the HTML.
-12. **In-session conversation context** — ScenarioParser currently sends single-turn requests. A rolling conversation history (last 3–5 turns) needs to be added for follow-up queries to work.
-13. **Sparse data disclosure in UI** — `coverage_tier: "sparse"` is set by validate.py but nothing in the UI surfaces it yet. Needs a notice in the globe tooltip or chat response.
-14. **Spend cap on Anthropic API** — set before any public traffic.
+**Launch blockers**
+
+1. **Privacy policy + Terms of Service + telemetry consent notice** — required before any public traffic. Telemetry stores full chat text remotely, and the system prompt actively invites emotional/personal context — disclosure is mandatory, not optional.
+2. **Data source attribution UI** — `public/data/attribution.json` exists but is invisible in the UI. Required for CC BY 4.0 compliance.
+3. **Supabase RLS policies** — verify anon key = INSERT only on the telemetry table before telemetry goes live.
+4. **Admin session viewer auth** — verify the Supabase Auth gate on `admin/session_viewer.html` before deploy.
+5. **Cost controls** — Anthropic spend cap; max query length in the edge function (none today = abuse vector); set `ALLOWED_ORIGIN` on the deployed function (defaults to `*`).
+
+**Missing core product**
+
+6. ~~**Region interaction**~~ ✅ Built 2026-07-03: `RegionPicker.js` (click/hover picking on an invisible boundary layer, selection highlight) + `CountryPanel.js` (slide-in inspector consuming climate.json + worldbank.json) + `#country-panel` element/CSS in index.html. `region_inspect` chat commands now fly to the country and open the panel. `WorldStateAnalytics.js` was retired 2026-07-03 — it expected V1's synthesized world-state metrics (systemicStress, migrationPressure…) that V2 never computes; recover from git history if a synthesis layer is ever built.
+7. ~~**System prompt out of sync with EVENT_TYPES**~~ ✅ Fixed 2026-07-03: all 12 missing events added to the prompt + solar_storm honest-scope rule + earthquake/volcanic climate-framing rule; synced to the edge function (verified via `npm run sync-prompt` — "already up to date"). **Redeploy still required:** `npx supabase functions deploy parse-scenario`.
+8. **scenario_compare / timeline_jump have no globe behavior** — EventSimulator handles `climate_event` and `region_inspect` only. (timeline_jump partially works: ChatInterface snaps the chapter when the command carries a year.)
+
+**Known bugs (open)**
+
+9. **CSP `frame-src 'none'`** in `public/_headers` may blank the ExportService modal (sandboxed `srcdoc` iframe) in production. Verify on Netlify; fall back to `frame-src 'self'` or a Blob-URL tab if blank.
+10. **`session_end` telemetry is lost on unload** — async Supabase insert inside `beforeunload`; switch to `navigator.sendBeacon` or `fetch(..., { keepalive: true })`.
+11. **`simulation:complete` is never emitted** — simulations run until evicted/ejected. Either implement a natural end or remove the event from the taxonomy.
+12. **ActiveSimulation duplicates a centroid table** — should import from `RegionCentroids.js` (single-source rule).
+13. **Sparse data disclosure in UI** — layers grey-fill sparse-tier countries but there's no user-facing notice. Current bake is all-"high" tier, so low priority.
+
+**Fixed in the 2026-07-03 audit**
+
+- SeaLevelLayer + PrecipitationLayer wired into main.js (layer buttons were dead)
+- ScenarioParser: failed requests no longer break user/assistant role alternation (one failure used to brick chat for the session)
+- LayerContract forwards `time:changed` to hidden layers (stale-data-on-reshow bug)
+- `report.grade` escaped before `innerHTML` injection (XSS)
+- TelemetryService: session start timestamp set (session_end `durationMs` was NaN) and now shares the app-wide `sessionId` from main.js
+- ScenarioParser event validation uses `Object.hasOwn` (prototype keys no longer pass)
 
 ---
 

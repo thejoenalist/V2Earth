@@ -1,8 +1,9 @@
 import { defineConfig } from 'vite';
 import cesium from 'vite-plugin-cesium';
+import { devParseScenarioPlugin } from './scripts/devParseScenarioPlugin.mjs';
 
 export default defineConfig({
-  plugins: [cesium()],
+  plugins: [cesium(), devParseScenarioPlugin()],
   server: {
     port: 5173,
   },

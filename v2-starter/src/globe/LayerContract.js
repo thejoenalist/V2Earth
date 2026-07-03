@@ -20,9 +20,12 @@ export class LayerContract {
   constructor() {
     this._visible = false;
 
-    // Auto-wire: listen for time changes and forward to updateTime
+    // Auto-wire: listen for time changes and forward to updateTime.
+    // Forwarded even while hidden — otherwise a layer re-shown after a
+    // chapter/SSP change renders stale data. Hidden updates are cheap
+    // (recoloring a non-rendered datasource).
     this._onTimeChanged = (payload) => {
-      if (this._visible) this.updateTime(payload);
+      this.updateTime(payload);
     };
     EventBus.on('time:changed', this._onTimeChanged);
 
@@ -67,8 +70,8 @@ export class LayerContract {
   }
 
   /**
-   * Called whenever the active year or SSP pathway changes.
-   * Only fired when the layer is visible.
+   * Called whenever the active year or SSP pathway changes,
+   * whether or not the layer is currently visible.
    * @param {{ year: number, ssp: string }} params
    * @returns {void}
    */

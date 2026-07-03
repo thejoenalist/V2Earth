@@ -392,15 +392,22 @@ Deno.serve(async (req: Request) => {
       },
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 1024,
+        max_tokens: 4096,
         system: SCENARIO_PARSER_SYSTEM_PROMPT,
         messages,
       }),
     });
 
     if (!anthropicRes.ok) {
-      console.error("[parse-scenario] Anthropic API error:", anthropicRes.status);
-      return jsonResponse({ error: "Failed to parse scenario" }, 500);
+      const errText = await anthropicRes.text().catch(() => "");
+      console.error("[parse-scenario] Anthropic API error:", anthropicRes.status, errText);
+      let detail = `status ${anthropicRes.status}`;
+      try {
+        detail = JSON.parse(errText).error?.message ?? detail;
+      } catch {
+        if (errText) detail = errText.slice(0, 200);
+      }
+      return jsonResponse({ error: `Anthropic API error: ${detail}` }, 502);
     }
 
     const anthropicData = await anthropicRes.json();

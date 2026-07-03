@@ -78,6 +78,20 @@ export const ISO_CENTROIDS = Object.freeze({
   HRV: { lat: 45.100, lon: 15.200 },
   NZL: { lat: -40.901, lon: 174.886 },
   PNG: { lat: -6.315, lon: 143.956 },
+  GHA: { lat: 7.950, lon: -1.020 },
+  GTM: { lat: 15.780, lon: -90.230 },
+  KAZ: { lat: 48.020, lon: 66.920 },
+  LBY: { lat: 26.340, lon: 17.230 },
+  MAR: { lat: 31.790, lon: -7.090 },
+  MOZ: { lat: -18.670, lon: 35.000 },
+  PRK: { lat: 40.340, lon: 127.510 },
+  SYR: { lat: 34.800, lon: 38.300 },
+  TZA: { lat: -6.370, lon: 34.890 },
+  URY: { lat: -32.520, lon: -55.770 },
+  UZB: { lat: 41.380, lon: 63.950 },
+  YEM: { lat: 15.550, lon: 48.520 },
+  ZMB: { lat: -13.130, lon: 27.850 },
+  ZWE: { lat: -19.020, lon: 29.150 },
 });
 
 /** Sahel regional centroid when no single country is targeted. */

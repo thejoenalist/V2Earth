@@ -8,6 +8,7 @@
  *  - eject:true on an incoming command clears the entire stack first,
  *    then optionally starts the new event clean
  *  - When the stack is full (3 layers), the oldest is evicted before adding the new one
+ *  - Each simulation ends naturally after SIMULATION_LIFETIME_MS (simulation:complete)
  *
  * EventBus contract:
  *   Listens:  simulation:requested  { command: SimulationCommand }
@@ -42,9 +43,11 @@ export class EventSimulator {
 
     this._boundOnRequested = this._onRequested.bind(this);
     this._boundOnEject     = this._onEject.bind(this);
+    this._boundOnComplete  = this._onComplete.bind(this);
 
     EventBus.on('simulation:requested', this._boundOnRequested);
     EventBus.on('simulation:eject',     this._boundOnEject);
+    EventBus.on('simulation:complete',  this._boundOnComplete);
   }
 
   // ── Public ───────────────────────────────────────────────────────────────
@@ -68,6 +71,18 @@ export class EventSimulator {
     if (command.eject === true) {
       this._clearStack('user_requested');
       if (!incomingEvent) return;
+    }
+
+    // region_inspect: fly the camera to the country and open the inspector
+    // panel — same event RegionPicker emits on a direct globe click.
+    if (command.type === 'region_inspect' && command.target) {
+      this._renderer.flyToISO?.(command.target);
+      EventBus.emit('region:selected', {
+        iso: command.target,
+        name: null,
+        coords: null,
+      });
+      return;
     }
 
     if (command.type !== 'climate_event' || !incomingEvent) return;
@@ -136,6 +151,21 @@ export class EventSimulator {
   }
 
   /**
+   * A simulation reached its natural lifetime (emitted by ActiveSimulation).
+   * Wind it down and update the stack.
+   * @param {{ commandId: string, eventType: string|null }} payload
+   */
+  _onComplete({ commandId }) {
+    const idx = this._stack.findIndex(s => s.command?.id === commandId);
+    if (idx === -1) return; // already evicted/ejected
+    const [sim] = this._stack.splice(idx, 1);
+    const eventType = sim.eventType;
+    this._destroySim(sim);
+    EventBus.emit('simulation:layer_removed', { eventType, reason: 'completed' });
+    this._emitStackChanged();
+  }
+
+  /**
    * Destroy one simulation and release its animation hold on the globe renderer.
    * Always use this instead of calling sim.destroy() directly.
    * @param {ActiveSimulation} sim
@@ -166,5 +196,6 @@ export class EventSimulator {
     this._clearStack('destroyed');
     EventBus.off('simulation:requested', this._boundOnRequested);
     EventBus.off('simulation:eject',     this._boundOnEject);
+    EventBus.off('simulation:complete',  this._boundOnComplete);
   }
 }

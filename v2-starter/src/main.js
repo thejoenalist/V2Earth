@@ -17,9 +17,14 @@ import { GlobeRenderer } from './globe/GlobeRenderer.js';
 import { EventSimulator } from './simulation/EventSimulator.js';
 import { ChatInterface } from './chat/ChatInterface.js';
 import { TemperatureLayer } from './layers/TemperatureLayer.js';
+import { SeaLevelLayer } from './layers/SeaLevelLayer.js';
+import { PrecipitationLayer } from './layers/PrecipitationLayer.js';
 import { TelemetryService } from './analytics/TelemetryService.js';
+import { ExportService } from './export/ExportService.js';
+import { RegionPicker } from './globe/RegionPicker.js';
+import { CountryPanel } from './ui/CountryPanel.js';
 
-/** Session ID for telemetry — imported by TelemetryService in Milestone 5. */
+/** App-wide session ID — shared by ChatInterface and TelemetryService. */
 export let sessionId = crypto.randomUUID();
 
 // ── Non-globe modules boot synchronously ──────────────────────────────────────
@@ -98,10 +103,20 @@ document.getElementById('onboarding-start')?.addEventListener('click', () => {
   const eventSimulator = new EventSimulator({ globeRenderer, timeController });
   const chatInterface = new ChatInterface({ timeController, sessionId });
 
+  // ExportService listens for report:export_requested and renders the
+  // download-ready document. No globe dependency, so it boots unconditionally.
+  const exportService = new ExportService();
+
+  // Region interaction: click picking on the globe + slide-in country panel.
+  const countryPanel = new CountryPanel({ timeController });
+  const regionPicker = new RegionPicker(globeRenderer.viewer);
+  regionPicker.load().catch((err) =>
+    console.error('[main] RegionPicker load failed:', err));
+
   // TelemetryService wires its own EventBus listeners internally.
   // Wrapped in try/catch so a Supabase config error never blocks globe boot.
   try {
-    new TelemetryService();
+    new TelemetryService({ sessionId });
   } catch (err) {
     console.warn('[main] TelemetryService failed to initialize:', err.message);
   }
@@ -109,18 +124,26 @@ document.getElementById('onboarding-start')?.addEventListener('click', () => {
   /** @type {import('./globe/LayerContract.js').LayerContract | null} */
   let activeDataLayer = null;
 
-  const temperatureLayer = new TemperatureLayer(globeRenderer.viewer);
-  temperatureLayer.load().then(() => {
+  // Data layer registry — matches the data-layer attributes in index.html.
+  // Temperature is eager-loaded (default active); the others lazy-load on
+  // first click so boot stays fast. load() is idempotent per LayerContract.
+  const dataLayers = {
+    temperature:   new TemperatureLayer(globeRenderer.viewer),
+    sea_level:     new SeaLevelLayer(globeRenderer.viewer),
+    precipitation: new PrecipitationLayer(globeRenderer.viewer),
+  };
+
+  dataLayers.temperature.load().then(() => {
     const activeBtn = document.querySelector('.layer-btn.active');
     if (activeBtn?.dataset.layer === 'temperature') {
-      temperatureLayer.show();
-      activeDataLayer = temperatureLayer;
+      dataLayers.temperature.show();
+      activeDataLayer = dataLayers.temperature;
     }
   }).catch((err) => console.error('[main] TemperatureLayer load failed:', err));
 
   function wireLayerSelector() {
     document.querySelectorAll('.layer-btn').forEach((btn) => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', async () => {
         document.querySelectorAll('.layer-btn').forEach((b) => b.classList.remove('active'));
         btn.classList.add('active');
 
@@ -130,9 +153,18 @@ document.getElementById('onboarding-start')?.addEventListener('click', () => {
         }
 
         const layerId = btn.dataset.layer;
-        if (layerId === 'temperature') {
-          temperatureLayer.show();
-          activeDataLayer = temperatureLayer;
+        const layer = dataLayers[layerId];
+        if (layer) {
+          try {
+            await layer.load();
+            // Guard against a stale click racing a slower load
+            if (btn.classList.contains('active')) {
+              layer.show();
+              activeDataLayer = layer;
+            }
+          } catch (err) {
+            console.error(`[main] ${layerId} layer load failed:`, err);
+          }
         }
 
         EventBus.emit('layer:changed', { layerId });

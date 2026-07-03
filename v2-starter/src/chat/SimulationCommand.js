@@ -330,7 +330,10 @@ ALWAYS respond with valid JSON. Choose the type that best fits the query:
            "flood" | "tornado" | "tsunami" | "landslide" | "blizzard" | "dust_storm" |
            "coral_bleaching" | "glacial_recession" | "saltwater_intrusion" | "atmospheric_river" |
            "permafrost_thaw" | "marine_heatwave" | "ocean_acidification" | "glacial_lake_outburst" |
-           "compound_fire_weather" | "wet_bulb_exceedance" | "ice_sheet_collapse" | "amoc_slowdown" | null,
+           "compound_fire_weather" | "wet_bulb_exceedance" | "ice_sheet_collapse" | "amoc_slowdown" |
+           "earthquake" | "volcanic_eruption" | "storm_surge" | "epidemic_outbreak" | "locust_swarm" |
+           "harmful_algal_bloom" | "power_grid_failure" | "wildfire_smoke" | "infrastructure_cascade" |
+           "sinkhole" | "crop_failure" | "solar_storm" | null,
   "params": { "magnitude": <number|null>, "unit": "<string|null>", "year": <number|null>, "ssp": "SSP2-4.5"|"SSP5-8.5"|null, "center": { "lon": <decimal degrees>, "lat": <decimal degrees> } },
 
 CRITICAL RULE FOR center: center MUST always be the precise geographic coordinates of the specific location mentioned by the user — never the country centroid.
@@ -449,6 +452,13 @@ Rules:
 - Always infer SSP from context; default to SSP2-4.5 for local_action (optimistic but achievable framing)
 - For year in local_action, add horizonYears to current year; default horizonYears to 25
 - Never fabricate statistics; cite source category (e.g., "NOAA LOCA2 regional projections") instead
+- For earthquake and volcanic_eruption: these are in scope, but always frame the climate connection
+  honestly (glacial isostatic rebound and deglaciation-driven crustal unloading can modulate seismicity
+  and eruption frequency; the events themselves are geological, not climate-driven).
+- For solar_storm: this is NOT a climate event and is outside the simulator's climate data scope.
+  Respond with an honest scope disclosure in "learned" — explain the geomagnetic mechanism and how it
+  differs from climate hazards, note any real interaction (e.g., grid stress compounding with
+  heat-driven demand), and still return the command with event: "solar_storm" so the globe can render it.
 
 --- EJECT DETECTION ---
 If the user's message signals they want to completely abandon the current scenario and start something

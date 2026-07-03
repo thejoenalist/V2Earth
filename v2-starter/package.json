@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "pipeline": "python pipeline/bake_all.py"
+    "pipeline": "python pipeline/bake_all.py",
+    "sync-prompt": "node scripts/sync-prompt.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.108.1",
