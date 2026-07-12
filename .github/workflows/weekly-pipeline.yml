@@ -47,6 +47,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
+    # All app code (pipeline/, public/) lives under v2-starter/ — run steps there.
+    # This was the cause of runs #1–#4 failing: 'pipeline/requirements.txt' not found.
+    defaults:
+      run:
+        working-directory: v2-starter
+
     steps:
       # ── Setup ──────────────────────────────────────────────────────────────
       - name: Checkout repo
@@ -57,6 +63,7 @@ jobs:
         with:
           python-version: '3.11'
           cache: 'pip'
+          cache-dependency-path: v2-starter/pipeline/requirements.txt
 
       - name: Install Python dependencies
         run: pip install -r pipeline/requirements.txt
@@ -85,7 +92,9 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: 'data: weekly pipeline refresh [skip ci]'
-          file_pattern: 'public/data/**'
+          # file_pattern is relative to the repo root (the action ignores
+          # defaults.run.working-directory)
+          file_pattern: 'v2-starter/public/data/**'
           commit_author: 'Earth Simulator Bot <bot@earthsimulator.app>'
           # [skip ci] in the commit message prevents an infinite loop
           # where the commit triggers another CI run.
