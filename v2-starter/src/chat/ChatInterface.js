@@ -115,13 +115,18 @@ export class ChatInterface {
       });
 
       loadingEl.remove();
-      EventBus.emit('simulation:requested', command);
-      this._renderNarrative(command);
 
+      // Snap the chapter BEFORE emitting simulation:requested: EventSimulator
+      // reads TimeController.year synchronously when creating the
+      // ActiveSimulation, so snapping after left renders labeled with the
+      // stale year (e.g. "+0.09 m by 2025" while the timeline showed 2050).
       if (command.params?.year && command.type !== 'explain') {
         const snap = this._timeController.snapToNearest(command.params.year);
         this._timeController.setChapter(snap);
       }
+
+      EventBus.emit('simulation:requested', command);
+      this._renderNarrative(command);
 
     } catch (err) {
       loadingEl.remove();

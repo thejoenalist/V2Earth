@@ -40,12 +40,15 @@ function createBlackMarbleProvider() {
   return new Cesium.WebMapTileServiceImageryProvider({
     url:
       'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/' +
+      // NOTE: this layer is PNG-only on GIBS — .jpg tiles return HTTP 400
+      // (verified against GetCapabilities 2026-07-12; night lights had been
+      // silently broken, non-fatal by design).
       'VIIRS_Black_Marble/default/2016-01-01/GoogleMapsCompatible_Level8' +
-      '/{TileMatrix}/{TileRow}/{TileCol}.jpg',
+      '/{TileMatrix}/{TileRow}/{TileCol}.png',
     layer: 'VIIRS_Black_Marble',
     style: 'default',
     tileMatrixSetID: 'GoogleMapsCompatible_Level8',
-    format: 'image/jpeg',
+    format: 'image/png',
     tileWidth: 256,
     tileHeight: 256,
     maximumLevel: 8,
