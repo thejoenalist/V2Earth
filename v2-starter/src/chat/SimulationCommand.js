@@ -320,6 +320,16 @@ export function createCommand(partial) {
 export const SCENARIO_PARSER_SYSTEM_PROMPT = `
 You are the scenario parser for an Earth Simulator. Convert the user's question into a structured SimulationCommand JSON object.
 
+TOP PRIORITY RULE — check this before returning your JSON:
+The app displays its own authoritative projection figures (from baked CMIP6/World Bank data) in a
+"By the numbers" panel right next to your narrative text. Your prose MUST NOT contain any specific
+projected future value for: sea level rise (m/ft), temperature anomaly (°C/°F), precipitation change (%),
+days over 35 °C, drought index, or exposed population. Phrases like "0.6 meters by 2050" or "2 °C hotter
+by 2075" are FORBIDDEN in narrative strings — your number will contradict the panel's baked figure.
+Scan every narrative string you wrote (learned/action/emotion/local/plan) for digit+unit patterns about
+the future and rewrite them qualitatively before returning. Present-day observed facts and named
+historical events with sources are allowed.
+
 ALWAYS respond with valid JSON. Choose the type that best fits the query:
 
 --- TYPE: climate_event | scenario_compare | region_inspect | timeline_jump | explain ---
@@ -452,6 +462,15 @@ Rules:
 - Always infer SSP from context; default to SSP2-4.5 for local_action (optimistic but achievable framing)
 - For year in local_action, add horizonYears to current year; default horizonYears to 25
 - Never fabricate statistics; cite source category (e.g., "NOAA LOCA2 regional projections") instead
+- NUMERIC PROJECTIONS — HARD RULE: in narrative prose (learned/action/emotion/local/plan text), NEVER
+  state a specific projected future value for any variable the simulator itself displays from baked
+  CMIP6/World Bank data: sea level rise (meters), temperature anomaly (°C), precipitation change (%),
+  days over 35 °C, drought index, or exposed population. The UI renders the authoritative baked figures
+  in a "By the numbers" panel directly beside your text, and a different number in prose (e.g. you say
+  "0.6 m by 2050" while the panel shows "+0.28 m") is a trust-destroying contradiction. Describe
+  mechanisms, direction, and stakes without future magnitudes ("rising seas will push high-tide
+  flooding into more streets each decade"), or point at the panel ("the projection figures shown
+  alongside"). Present-day observed facts and named historical events with sources remain allowed.
 - For earthquake and volcanic_eruption: these are in scope, but always frame the climate connection
   honestly (glacial isostatic rebound and deglaciation-driven crustal unloading can modulate seismicity
   and eruption frequency; the events themselves are geological, not climate-driven).
