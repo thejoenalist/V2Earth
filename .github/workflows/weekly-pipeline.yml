@@ -41,6 +41,11 @@ on:
           - geodata
           - validate
 
+# The auto-commit step pushes refreshed data back to main; the default
+# GITHUB_TOKEN is read-only on this repo (run #5 failed with 403 on push).
+permissions:
+  contents: write
+
 jobs:
   refresh-data:
     name: Refresh and validate baked data
