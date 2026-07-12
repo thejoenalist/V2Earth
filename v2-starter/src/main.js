@@ -133,42 +133,46 @@ document.getElementById('onboarding-start')?.addEventListener('click', () => {
   let activeDataLayer = null;
 
   // Data layer registry — matches the data-layer attributes in index.html.
-  // Temperature is eager-loaded (default active); the others lazy-load on
-  // first click so boot stays fast. load() is idempotent per LayerContract.
+  // All layers are OFF by default (user call 2026-07-12: fills obstruct the
+  // prompt-driven renders) and lazy-load on first click. Clicking the active
+  // button toggles it off. While a simulation is on the globe, any active
+  // fill auto-hides and comes back when the stack empties.
   const dataLayers = {
     temperature:   new TemperatureLayer(globeRenderer.viewer),
     sea_level:     new SeaLevelLayer(globeRenderer.viewer),
     precipitation: new PrecipitationLayer(globeRenderer.viewer),
   };
 
-  dataLayers.temperature.load().then(() => {
-    const activeBtn = document.querySelector('.layer-btn.active');
-    if (activeBtn?.dataset.layer === 'temperature') {
-      dataLayers.temperature.show();
-      activeDataLayer = dataLayers.temperature;
-    }
-  }).catch((err) => console.error('[main] TemperatureLayer load failed:', err));
+  // True while a simulation render is active — data layer fills stay hidden.
+  let dataLayerSuppressed = false;
 
   function wireLayerSelector() {
     document.querySelectorAll('.layer-btn').forEach((btn) => {
       btn.addEventListener('click', async () => {
-        document.querySelectorAll('.layer-btn').forEach((b) => b.classList.remove('active'));
-        btn.classList.add('active');
+        const layerId = btn.dataset.layer;
+        const wasActive = btn.classList.contains('active');
 
+        document.querySelectorAll('.layer-btn').forEach((b) => b.classList.remove('active'));
         if (activeDataLayer) {
           activeDataLayer.hide();
           activeDataLayer = null;
         }
 
-        const layerId = btn.dataset.layer;
+        // Toggle off: clicking the active button leaves everything hidden.
+        if (wasActive) {
+          EventBus.emit('layer:changed', { layerId: null });
+          return;
+        }
+
+        btn.classList.add('active');
         const layer = dataLayers[layerId];
         if (layer) {
           try {
             await layer.load();
             // Guard against a stale click racing a slower load
             if (btn.classList.contains('active')) {
-              layer.show();
               activeDataLayer = layer;
+              if (!dataLayerSuppressed) layer.show();
             }
           } catch (err) {
             console.error(`[main] ${layerId} layer load failed:`, err);
@@ -181,6 +185,18 @@ document.getElementById('onboarding-start')?.addEventListener('click', () => {
   }
 
   wireLayerSelector();
+
+  // Auto-hide the active fill while simulations own the globe.
+  EventBus.on('simulation:stack_changed', ({ stack }) => {
+    const simsActive = (stack?.length ?? 0) > 0;
+    if (simsActive && !dataLayerSuppressed) {
+      dataLayerSuppressed = true;
+      activeDataLayer?.hide();
+    } else if (!simsActive && dataLayerSuppressed) {
+      dataLayerSuppressed = false;
+      activeDataLayer?.show();
+    }
+  });
 
   EventBus.on('time:changed', ({ year }) => {
     updateActiveChapter(year);

@@ -246,20 +246,25 @@ export class GlobeRenderer {
    * get a cinematic soft glow. Kept subtle so it doesn't over-saturate.
    */
   _addBloom() {
+    // Kill switch: bloom OFF until visually tuned. Historical note: the old
+    // add(createBloomStage()) call collided with Cesium's BUILT-IN czm_bloom
+    // stage and threw, so bloom never actually ran — every "tuned" uniform
+    // below was written blind. First real activation (2026-07-12) crushed the
+    // scene to black (contrast 150 + HDR). Tune ON-SCREEN before enabling:
+    // start from Cesium defaults (contrast 128, brightness -0.3, delta 1,
+    // sigma 3.8, stepSize 5) and adjust with the globe visible.
+    const USE_BLOOM = false;
     try {
-      const bloom = this._scene.postProcessStages.add(
-        Cesium.PostProcessStageLibrary.createBloomStage()
-      );
-      // High contrast = bloom only fires on very bright pixels (limb, city lights).
-      // Negative brightness = raises the threshold further — no muddy global glow.
-      bloom.uniforms.contrast   = 150;
-      bloom.uniforms.brightness = -0.2;
+      const bloom = this._scene.postProcessStages.bloom; // built-in stage
+      bloom.enabled = USE_BLOOM;
+      this._bloom = bloom;
+      if (!USE_BLOOM) return;
+      bloom.uniforms.contrast   = 128;
+      bloom.uniforms.brightness = -0.3;
       bloom.uniforms.glowOnly   = false;
       bloom.uniforms.delta      = 1.0;
-      bloom.uniforms.sigma      = 2.5;  // slightly wider spread vs before
-      bloom.uniforms.stepSize   = 1.0;
-      bloom.enabled = true;
-      this._bloom = bloom;
+      bloom.uniforms.sigma      = 3.8;
+      bloom.uniforms.stepSize   = 5.0;
     } catch (e) {
       console.warn('[GlobeRenderer] Bloom unavailable:', e.message);
       this._bloom = null;
@@ -277,6 +282,10 @@ export class GlobeRenderer {
    * CloudCollection is supported from CesiumJS 1.83+.
    */
   _addGlobalClouds() {
+    // OFF per user call 2026-07-12 (same session as the cloud shell): the puffs
+    // read as noise over the imagery. Kill switch mirrors USE_CLOUD_SHELL.
+    const USE_CLOUD_PUFFS = false;
+    if (!USE_CLOUD_PUFFS) return;
     try {
       /** @type {Cesium.CloudCollection} */
       const clouds = new Cesium.CloudCollection();
@@ -341,7 +350,8 @@ export class GlobeRenderer {
    * Kill switch: set USE_CLOUD_SHELL false if it fights a layer visually.
    */
   _addCloudShell() {
-    const USE_CLOUD_SHELL = true;
+    // OFF per user call 2026-07-12: obstructs landscape detail. Revive by flag.
+    const USE_CLOUD_SHELL = false;
     if (!USE_CLOUD_SHELL) return;
     try {
       const canvas = this._makeCloudCanvas(1024, 512);

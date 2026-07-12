@@ -6,11 +6,25 @@ const CLIMATE_URL = '/data/climate.json';
 const BOUNDARIES_URL = '/data/countries.geojson';
 
 /**
+ * Hue encodes the projected rise (so the chapter/SSP progression still reads);
+ * intensity encodes the country's baked coastal exposure. Global mean sea level
+ * is nearly uniform at any given chapter (2075 SSP2 spread is ~0.38–0.48 m), so
+ * a rise-only fill painted every country — including landlocked ones — the same
+ * color: the "beige wash". Exposure is what actually varies between countries.
+ *
  * @param {number | null | undefined} riseM Sea level rise in meters
  * relative to baseline (FIELD_BOUNDS: -0.05 to 1.5)
+ * @param {number | null | undefined} exposure `exposed_population_pct`
+ * from climate.json, 0–1. 0 (landlocked) → no fill. null → faint fallback fill.
  */
-function riseToColor(riseM) {
+function riseToColor(riseM, exposure) {
   if (riseM == null || Number.isNaN(riseM)) return null;
+  if (exposure === 0) return null; // landlocked — sea level rise does not fill Mongolia
+
+  // Unknown exposure: show the rise hue, but too faint to assert anything.
+  const alpha = exposure == null
+    ? 0.2
+    : 0.25 + 0.6 * Math.min(1, Math.max(0, exposure));
 
   const pale   = Cesium.Color.fromCssColorString('hsl(190, 60%, 88%)'); // near-zero / negligible
   const teal   = Cesium.Color.fromCssColorString('hsl(190, 70%, 65%)'); // low
@@ -18,23 +32,26 @@ function riseToColor(riseM) {
   const indigo = Cesium.Color.fromCssColorString('hsl(255, 65%, 45%)'); // high
   const red    = Cesium.Color.fromCssColorString('hsl(345, 85%, 50%)'); // critical inundation risk
 
-  if (riseM <= 0) return pale.withAlpha(0.55);
-
-  if (riseM < 0.15) {
-    return Cesium.Color.lerp(pale, teal, riseM / 0.15, new Cesium.Color()).withAlpha(0.7);
+  let color;
+  if (riseM <= 0) {
+    color = pale;
+  } else if (riseM < 0.15) {
+    color = Cesium.Color.lerp(pale, teal, riseM / 0.15, new Cesium.Color());
+  } else if (riseM < 0.4) {
+    color = Cesium.Color.lerp(teal, blue, (riseM - 0.15) / 0.25, new Cesium.Color());
+  } else if (riseM < 0.8) {
+    color = Cesium.Color.lerp(blue, indigo, (riseM - 0.4) / 0.4, new Cesium.Color());
+  } else {
+    const t = Math.min(1, (riseM - 0.8) / 0.7);
+    color = Cesium.Color.lerp(indigo, red, t, new Cesium.Color());
   }
-  if (riseM < 0.4) {
-    return Cesium.Color.lerp(teal, blue, (riseM - 0.15) / 0.25, new Cesium.Color()).withAlpha(0.75);
-  }
-  if (riseM < 0.8) {
-    return Cesium.Color.lerp(blue, indigo, (riseM - 0.4) / 0.4, new Cesium.Color()).withAlpha(0.8);
-  }
-  const t = Math.min(1, (riseM - 0.8) / 0.7);
-  return Cesium.Color.lerp(indigo, red, t, new Cesium.Color()).withAlpha(0.85);
+  return color.withAlpha(alpha);
 }
 
 /**
- * SeaLevelLayer — choropleth of CMIP6-derived sea level rise by country.
+ * SeaLevelLayer — choropleth of CMIP6-derived sea level rise by country,
+ * exposure-weighted: hue = projected rise, intensity = exposed_population_pct
+ * (both baked in climate.json). Landlocked countries are not filled.
  *
  * Mirrors TemperatureLayer's structure: same GeoJsonDataSource setup
  * (GEODESIC arcType + coarse granularity to avoid the "Too many properties"
@@ -153,7 +170,7 @@ export class SeaLevelLayer extends LayerContract {
         continue;
       }
 
-      const color = riseToColor(riseM);
+      const color = riseToColor(riseM, record.exposed_population_pct);
       this._setPolygonStyle(entity, color, false);
     }
   }
