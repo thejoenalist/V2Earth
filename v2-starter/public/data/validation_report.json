@@ -1,5 +1,5 @@
 {
-  "validated_at": "2026-06-13T15:53:55.422927+00:00",
+  "validated_at": "2026-07-05T14:57:45.757722+00:00",
   "passed": true,
   "results": {
     "climate": "PASS",
@@ -12,6 +12,6 @@
   "warning_count": 1,
   "errors": [],
   "warnings": [
-    "manifest.json: could not parse baked_at timestamp"
+    "manifest.json: data is 22 days old (baked 2026-06-13T14:23:03Z) \u2014 weekly pipeline may have failed"
   ]
 }

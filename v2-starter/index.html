@@ -544,6 +544,183 @@
       border: none;
       background: #fff;
     }
+
+    /* ── Footer links (privacy / terms / attribution) ───────── */
+    #footer-links {
+      position: fixed;
+      bottom: 8px;
+      left: 16px;
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      z-index: 110;
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    #footer-links a, #footer-links button {
+      background: none;
+      border: none;
+      padding: 0;
+      font-family: var(--font);
+      font-size: 10px;
+      color: var(--text-muted);
+      text-decoration: none;
+      cursor: pointer;
+      transition: color 0.15s;
+    }
+
+    #footer-links a:hover, #footer-links button:hover { color: var(--accent); }
+
+    .footer-sep { opacity: 0.5; pointer-events: none; }
+
+    /* ── Consent banner (ConsentBanner.js) ──────────────────── */
+    #consent-banner {
+      position: fixed;
+      left: 50%;
+      /* clears the chat input row, which sits at timeline-height + 16px */
+      bottom: calc(var(--timeline-height) + 92px);
+      transform: translateX(-50%);
+      width: min(620px, calc(100vw - 32px));
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      backdrop-filter: blur(12px);
+      padding: 16px 20px;
+      z-index: 250; /* above onboarding (200), below export modal (300) */
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+      display: none;
+    }
+
+    #consent-banner.visible { display: block; }
+
+    .consent-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 6px;
+    }
+
+    .consent-body {
+      font-size: 12px;
+      line-height: 1.55;
+      color: var(--text-muted);
+    }
+
+    .consent-body a { color: var(--accent); text-decoration: none; }
+    .consent-body a:hover { text-decoration: underline; }
+
+    .consent-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .consent-btn {
+      padding: 7px 18px;
+      font-size: 12px;
+      font-family: var(--font);
+      border-radius: 16px;
+      cursor: pointer;
+      transition: all 0.15s;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-muted);
+    }
+
+    .consent-btn:hover { color: var(--text); border-color: var(--accent-dim); }
+
+    .consent-btn--accept {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: var(--bg);
+      font-weight: 600;
+    }
+
+    .consent-btn--accept:hover { opacity: 0.85; color: var(--bg); }
+
+    /* ── Attribution modal (AttributionModal.js) ────────────── */
+    #attribution-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(5, 13, 20, 0.72);
+      backdrop-filter: blur(4px);
+      z-index: 300;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 32px;
+    }
+
+    #attribution-overlay.visible { display: flex; }
+
+    #attribution-modal {
+      width: min(560px, 100%);
+      max-height: 80vh;
+      overflow-y: auto;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+    }
+
+    .attr-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+
+    .attr-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .attr-intro {
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.55;
+      margin-bottom: 14px;
+    }
+
+    .attr-source {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin-bottom: 10px;
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .attr-source-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .attr-source-license {
+      display: inline-block;
+      font-size: 10px;
+      color: var(--accent);
+      border: 1px solid var(--accent-dim);
+      border-radius: 8px;
+      padding: 1px 8px;
+      margin-top: 4px;
+    }
+
+    .attr-source-detail {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 6px;
+      line-height: 1.5;
+      overflow-wrap: anywhere;
+    }
+
+    .attr-source-detail a { color: var(--accent); text-decoration: none; }
+    .attr-source-detail a:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
@@ -589,6 +766,37 @@
     <h1>See where the Earth is headed.</h1>
     <p>Explore real climate projections, economic shifts, and cascading crises — from today to 2100.</p>
     <button id="onboarding-start">Explore the Earth</button>
+  </div>
+
+  <!-- Telemetry consent banner (wired by ConsentBanner.js) -->
+  <div id="consent-banner" role="dialog" aria-modal="false" aria-labelledby="consent-title">
+    <div class="consent-title" id="consent-title">Help us understand what people ask about the planet</div>
+    <div class="consent-body">
+      With your permission, we record what you explore and ask in this session —
+      including the full text of your chat messages — and store it remotely so we
+      can improve the simulator. Nothing is saved on your device between visits,
+      and you can use everything with telemetry off.
+      See our <a href="/privacy.html" target="_blank" rel="noopener">Privacy Policy</a>
+      and <a href="/terms.html" target="_blank" rel="noopener">Terms of Service</a>.
+    </div>
+    <div class="consent-actions">
+      <button class="consent-btn" id="consent-decline">No thanks</button>
+      <button class="consent-btn consent-btn--accept" id="consent-accept">Allow telemetry</button>
+    </div>
+  </div>
+
+  <!-- Footer links -->
+  <div id="footer-links">
+    <button id="attribution-link" type="button">About the data</button>
+    <span class="footer-sep">·</span>
+    <a href="/privacy.html" target="_blank" rel="noopener">Privacy</a>
+    <span class="footer-sep">·</span>
+    <a href="/terms.html" target="_blank" rel="noopener">Terms</a>
+  </div>
+
+  <!-- Attribution modal (populated by AttributionModal.js from /data/attribution.json) -->
+  <div id="attribution-overlay" role="dialog" aria-modal="true" aria-labelledby="attribution-title">
+    <div id="attribution-modal"></div>
   </div>
 
   <script type="module" src="/src/main.js"></script>

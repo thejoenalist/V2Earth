@@ -141,10 +141,30 @@ def exposed_population_pct(iso: str, slr_m: float) -> float:
     return round(min(1.0, base * (1.0 + slr_m * 1.5)), 4)
 
 
-def drought_index(precip_change_pct: float | None) -> float | None:
+def drought_index(precip_change_pct: float | None, temp_anomaly_c: float | None) -> float | None:
+    """Stylized 0–1 drought severity for the chapter/SSP.
+
+    Combines two drivers instead of precipitation alone (the old formula read
+    0.0 for any country with rising annual precipitation — ~60% of records,
+    including the USA — because warming-driven evaporative demand was ignored):
+
+      precip term  (weight 0.6): -precip_change_pct / 60 — deficit raises the
+        index; a surplus *offsets* the heat term (goes negative before clamp).
+      evap term    (weight 0.4): temp_anomaly_c / 6 — potential
+        evapotranspiration rises with warming (~AR6: PET up a few %/°C);
+        +6 °C ≈ saturated demand term. Clamped to [0, 1] so implausible
+        anomalies don't dominate.
+
+    Falls back to the precip-only formula when no temperature anomaly exists,
+    so sparse-tier records behave exactly as before.
+    """
     if precip_change_pct is None:
         return None
-    return round(max(0.0, min(1.0, -precip_change_pct / 60.0)), 3)
+    precip_term = -precip_change_pct / 60.0
+    if temp_anomaly_c is None:
+        return round(max(0.0, min(1.0, precip_term)), 3)
+    evap_term = max(0.0, min(1.0, temp_anomaly_c / 6.0))
+    return round(max(0.0, min(1.0, 0.6 * precip_term + 0.4 * evap_term)), 3)
 
 
 def coverage_tier(confidence: float | None) -> str:
@@ -221,7 +241,7 @@ def main() -> int:
                 precip = pr_val
                 if precip is not None:
                     precip = round(max(-60.0, min(100.0, precip)), 2)
-                drought = drought_index(precip)
+                drought = drought_index(precip, tas_val)
                 exposed = exposed_population_pct(iso, slr_m)
                 confidence = 0.91 if tas_val is not None else 0.3
 

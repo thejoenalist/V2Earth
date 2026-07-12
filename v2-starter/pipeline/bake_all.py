@@ -29,6 +29,8 @@ FETCHERS = [
     ("fetch_boundaries.py", "Country boundaries (Natural Earth)"),
     ("fetch_worldbank.py", "GDP, population, HDI (World Bank + UNDP)"),
     ("fetch_cmip6.py", "Climate projections SSP2+SSP5 (CMIP6 via CCKP)"),
+    ("fetch_cities.py", "City pins + populations (GeoNames / Natural Earth)"),
+    ("bake_geodata.py", "Coastal inundation polygons (Copernicus GLO-30 DEM)"),
     ("build_attribution.py", "Data source attribution (CC BY 4.0)"),
 ]
 

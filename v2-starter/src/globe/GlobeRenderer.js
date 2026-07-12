@@ -144,6 +144,12 @@ export class GlobeRenderer {
     this._esriLayer = null;
     this._updateImageryDetail = null;
     this._chapterNightAlpha = 1.0;
+
+    // V3 cinematic pass
+    this._cloudShell = null;        // full-globe procedural cloud primitive
+    this._buildings = null;         // OSM Buildings tileset (ion) — close-ups only
+    this._buildingsLoading = null;  // in-flight promise guard
+    this._savedMinZoom = null;      // zoom floor stashed during close-ups
   }
 
   /**
@@ -227,6 +233,7 @@ export class GlobeRenderer {
     this._applyStylizedDefaults();
     this._addBloom();
     this._addGlobalClouds();
+    this._addCloudShell();
     this.applyChapterAesthetic(2025);
 
     this.viewer.resize();
@@ -318,6 +325,131 @@ export class GlobeRenderer {
     }
   }
 
+  // ── Cloud shell (procedural, full-globe) ───────────────────────────────────
+
+  /**
+   * Semi-transparent cloud shell ~15 km above the surface — the animated-cloud
+   * look from cinematic Earth renders, minus the animation (static so
+   * requestRenderMode keeps saving GPU at idle; clouds still sun-shade across
+   * the terminator via the lit material).
+   *
+   * The texture is PROCEDURAL (fractal value noise generated on an offscreen
+   * canvas at init) — decorative only, carries no data, so it doesn't touch the
+   * baked-data-only rule. No external asset, no network.
+   *
+   * allowPicking:false keeps RegionPicker's scene.pick working through it.
+   * Kill switch: set USE_CLOUD_SHELL false if it fights a layer visually.
+   */
+  _addCloudShell() {
+    const USE_CLOUD_SHELL = true;
+    if (!USE_CLOUD_SHELL) return;
+    try {
+      const canvas = this._makeCloudCanvas(1024, 512);
+
+      const material = new Cesium.Material({
+        translucent: true,
+        fabric: {
+          uniforms: {
+            image: canvas.toDataURL('image/png'),
+            alphaMult: 0.55,
+          },
+          source: `
+            czm_material czm_getMaterial(czm_materialInput materialInput) {
+              czm_material m = czm_getDefaultMaterial(materialInput);
+              vec4 c = texture(image, materialInput.st);
+              m.diffuse = vec3(1.0);
+              m.alpha = c.a * alphaMult;
+              return m;
+            }`,
+        },
+      });
+
+      const CLOUD_ALT = 15000; // m above ellipsoid
+      const geometry = new Cesium.EllipsoidGeometry({
+        radii: new Cesium.Cartesian3(
+          6378137 + CLOUD_ALT, 6378137 + CLOUD_ALT, 6356752 + CLOUD_ALT),
+        vertexFormat: Cesium.MaterialAppearance.MaterialSupport.TEXTURED.vertexFormat,
+        stackPartitions: 48,
+        slicePartitions: 96,
+      });
+
+      const primitive = new Cesium.Primitive({
+        geometryInstances: new Cesium.GeometryInstance({ geometry }),
+        appearance: new Cesium.MaterialAppearance({
+          material,
+          translucent: true,
+          closed: false,
+        }),
+        allowPicking: false,
+        asynchronous: false,
+      });
+
+      this._scene.primitives.add(primitive);
+      this._cloudShell = primitive;
+    } catch (e) {
+      console.warn('[GlobeRenderer] Cloud shell unavailable:', e.message);
+      this._cloudShell = null;
+    }
+  }
+
+  /**
+   * Fractal value-noise cloud texture. White RGB, coverage in alpha.
+   * Deterministic (fixed seed) so every load looks the same.
+   *
+   * @param {number} w @param {number} h
+   * @returns {HTMLCanvasElement}
+   */
+  _makeCloudCanvas(w, h) {
+    // Seeded PRNG (mulberry32) — reproducible cloud pattern
+    let s = 0x9e3779b9;
+    const rand = () => {
+      s |= 0; s = (s + 0x6d2b79f5) | 0;
+      let t = Math.imul(s ^ (s >>> 15), 1 | s);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+
+    // Value-noise lattice, wrapped horizontally so the seam at lon ±180 is clean
+    const GRID = 64;
+    const lattice = new Float32Array(GRID * GRID);
+    for (let i = 0; i < lattice.length; i++) lattice[i] = rand();
+    const smooth = (t) => t * t * (3 - 2 * t);
+    const noise = (x, y) => {
+      const xi = Math.floor(x) % GRID, yi = Math.floor(y) % GRID;
+      const xf = x - Math.floor(x),    yf = y - Math.floor(y);
+      const x1 = (xi + 1) % GRID,      y1 = (yi + 1) % GRID;
+      const a = lattice[yi * GRID + xi], b = lattice[yi * GRID + x1];
+      const c = lattice[y1 * GRID + xi], d = lattice[y1 * GRID + x1];
+      const u = smooth(xf), v = smooth(yf);
+      return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+    };
+
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    const img = ctx.createImageData(w, h);
+    for (let y = 0; y < h; y++) {
+      const lat = (y / h - 0.5) * Math.PI; // -90..90
+      // Thin clouds toward poles + slight ITCZ boost near the equator
+      const latShape = Math.cos(lat) * 0.85 + 0.15 * Math.exp(-Math.pow(lat / 0.18, 2));
+      for (let x = 0; x < w; x++) {
+        // 4-octave fBm
+        let v = 0, amp = 0.5, fx = (x / w) * GRID, fy = (y / h) * GRID;
+        for (let o = 0; o < 4; o++) {
+          v += amp * noise(fx, fy);
+          fx *= 2; fy *= 2; amp *= 0.5;
+        }
+        // Threshold → coverage ~45%, soft edges
+        const cover = Math.min(1, Math.max(0, (v - 0.52) * 4.2)) * latShape;
+        const idx = (y * w + x) * 4;
+        img.data[idx] = 255; img.data[idx + 1] = 255; img.data[idx + 2] = 255;
+        img.data[idx + 3] = Math.round(cover * 255);
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    return canvas;
+  }
+
   // ── Chapter aesthetic ──────────────────────────────────────────────────────
 
   /**
@@ -350,6 +482,13 @@ export class GlobeRenderer {
 
     if (this._bloom) {
       this._bloom.uniforms.brightness = -0.2 + t * 0.15;
+    }
+
+    // Clouds thin out as the world desaturates — keeps the 2100 globe stark
+    if (this._cloudShell) {
+      try {
+        this._cloudShell.appearance.material.uniforms.alphaMult = 0.55 * (1 - t * 0.45);
+      } catch (_) { /* material not compiled yet — first frame applies default */ }
     }
 
     this._scene.requestRender();
@@ -450,6 +589,15 @@ export class GlobeRenderer {
     // Light intensity on scene — stronger contrast between lit/shadow face
     scene.light = new Cesium.SunLight();
 
+    // HDR: lets the atmospheric limb and city lights actually GLOW instead of
+    // clipping at 1.0 — the single biggest step toward the cinematic reference
+    // look. Guarded: falls back silently on WebGL1 / unsupported GPUs.
+    // Bloom thresholds below were re-checked under HDR (they read bright pixels
+    // post-tonemap, so the SDR-tuned values still behave).
+    if (scene.highDynamicRangeSupported) {
+      scene.highDynamicRange = true;
+    }
+
     scene.skyBox.show = true;
     // FXAA: smooth tile seams and label edges; cheap at idle
     scene.postProcessStages.fxaa.enabled = true;
@@ -467,6 +615,101 @@ export class GlobeRenderer {
 
   resize() {
     this.viewer?.resize();
+  }
+
+  /**
+   * Cinematic close-up flight to a city (VISUAL_UPGRADE_PLAN F5).
+   * Globe → tilted street-ish altitude, with OSM Buildings toggled visible for
+   * the duration. Call exitCloseUp() to restore the global view contract.
+   *
+   * The 100 km minimumZoomDistance is temporarily lowered so the camera can
+   * descend; restored on exit. Buildings load once (ion tileset), then toggle.
+   *
+   * @param {number} lon @param {number} lat
+   * @param {Object} [opts]
+   * @param {number} [opts.height=1600]   final camera altitude (m)
+   * @param {number} [opts.heading=25]    degrees
+   * @param {number} [opts.pitch=-30]     degrees (negative = looking down)
+   * @param {number} [opts.duration=3.5]  seconds
+   * @param {boolean} [opts.buildings=true]
+   * @returns {Promise<void>} resolves when the flight completes (or is cancelled)
+   */
+  async cityCloseUp(lon, lat, opts = {}) {
+    if (!this.viewer) return;
+    const {
+      height = 1600, heading = 25, pitch = -30, duration = 3.5, buildings = true,
+    } = opts;
+
+    if (this._savedMinZoom === null) {
+      const ctrl = this._scene.screenSpaceCameraController;
+      this._savedMinZoom = ctrl.minimumZoomDistance;
+      ctrl.minimumZoomDistance = 250;
+    }
+    if (buildings) await this._ensureBuildings();
+
+    this.beginAnimation(); // continuous render while the tileset streams in
+    await new Promise((resolve) => {
+      this.viewer.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(lon, lat, height),
+        orientation: {
+          heading: Cesium.Math.toRadians(heading),
+          pitch: Cesium.Math.toRadians(pitch),
+          roll: 0,
+        },
+        duration,
+        easingFunction: Cesium.EasingFunction.QUADRATIC_IN_OUT,
+        complete: resolve,
+        cancel: resolve,
+      });
+    });
+    this.endAnimation();
+  }
+
+  /**
+   * Leave close-up mode: hide buildings (ion streaming stops when hidden),
+   * restore the global zoom floor. Camera position is left where the user has
+   * it — first-load-is-user-directed applies to exits too.
+   */
+  exitCloseUp() {
+    if (this._buildings) this._buildings.show = false;
+    if (this._savedMinZoom !== null) {
+      this._scene.screenSpaceCameraController.minimumZoomDistance = this._savedMinZoom;
+      this._savedMinZoom = null;
+    }
+    this._scene.requestRender();
+  }
+
+  /**
+   * Load the OSM Buildings ion tileset once; subsequent calls just toggle it
+   * visible. No ion token → resolves without buildings (graceful skip, same
+   * pattern as terrain). Tileset is owned by GlobeRenderer, NOT by simulations
+   * (VISUAL_UPGRADE_PLAN §5) — destroyed only in destroy().
+   *
+   * @returns {Promise<void>}
+   */
+  async _ensureBuildings() {
+    if (this._buildings) {
+      this._buildings.show = true;
+      this._scene.requestRender();
+      return;
+    }
+    if (!import.meta.env.VITE_CESIUM_ION_TOKEN) return;
+    if (!this._buildingsLoading) {
+      this._buildingsLoading = Cesium.createOsmBuildingsAsync({
+        // Subtle default style — let imagery/terrain carry the color
+        defaultColor: Cesium.Color.fromCssColorString('#c8c2b6'),
+      })
+        .then((tileset) => {
+          this._buildings = tileset;
+          this._scene.primitives.add(tileset);
+          this._scene.requestRender();
+        })
+        .catch((e) => {
+          console.warn('[GlobeRenderer] OSM Buildings unavailable:', e.message);
+          this._buildingsLoading = null; // allow retry on next close-up
+        });
+    }
+    await this._buildingsLoading;
   }
 
   flyToISO(iso) {
@@ -489,6 +732,12 @@ export class GlobeRenderer {
     }
     if (this._clouds && this._scene) {
       try { this._scene.primitives.remove(this._clouds); } catch (_) {}
+    }
+    if (this._cloudShell && this._scene) {
+      try { this._scene.primitives.remove(this._cloudShell); } catch (_) {}
+    }
+    if (this._buildings && this._scene) {
+      try { this._scene.primitives.remove(this._buildings); } catch (_) {}
     }
     this.viewer?.destroy();
   }

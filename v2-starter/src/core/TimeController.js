@@ -1,10 +1,10 @@
 import { EventBus } from './EventBus.js';
 
 /**
- * TimeController — manages chapter state and SSP pathway.
+ * TimeController - manages chapter state and SSP pathway.
  *
  * The single source of truth for "when" the simulation is set.
- * All layers listen to `time:changed` via EventBus — they never
+ * All layers listen to `time:changed` via EventBus - they never
  * read TimeController directly.
  */
 
@@ -19,7 +19,7 @@ export const CHAPTER_META = Object.freeze({
   2025: { name: 'Today',           dataMode: 'scientific', description: 'Present-day observed data' },
   2050: { name: 'Mid-Century',     dataMode: 'scientific', description: 'High confidence CMIP6 projections' },
   2075: { name: 'Late Century',    dataMode: 'scientific', description: 'CMIP6 SSP divergence zone' },
-  2100: { name: 'End of Century',  dataMode: 'scientific', description: 'CMIP6 endpoint — full projection range' },
+  2100: { name: 'End of Century',  dataMode: 'scientific', description: 'CMIP6 endpoint - full projection range' },
 });
 
 export class TimeController {
@@ -63,6 +63,10 @@ export class TimeController {
       return;
     }
     this._ssp = ssp;
+    // Broadcast the SSP change on its own channel (TelemetryService listens here
+    // to record pathway switches in the session story) AND emit time:changed so
+    // data layers re-render against the new pathway.
+    EventBus.emit('ssp:changed', { ssp: this._ssp });
     this._emit();
   }
 

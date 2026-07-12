@@ -11,6 +11,7 @@ vite.config.js.timestamp-*.mjs
 
 # Pipeline cache
 v2-starter/pipeline/.cache/
+v2-starter/pipeline/.dem_cache/
 
 # Supabase local dev
 .supabase/

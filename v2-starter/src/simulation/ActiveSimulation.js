@@ -12,6 +12,8 @@
 import { EVENT_TYPES } from '../chat/SimulationCommand.js';
 import { EventBus } from '../core/EventBus.js';
 import { getCentroid } from '../globe/RegionCentroids.js';
+import { getImpactStats, fmtCount } from '../data/ImpactStats.js';
+import { findFlagshipMetro, loadInundation, pickLevel } from './InundationGeodata.js';
 import * as Cesium from 'cesium';
 
 /**
@@ -323,10 +325,189 @@ export class ActiveSimulation {
 
   async _renderSeaLevelRise() {
     const { lon, lat } = this._getCenter();
-    const mag    = this.command.params?.magnitude ?? 1.5; // metres
-    const floodR = 400_000 + mag * 80_000;
-    const rise   = { val: 0 }; // 0→1 over 12 s
+    const mag = this.command.params?.magnitude ?? 1.5; // metres (parser hint — sizes visuals only)
 
+    // ── Real numbers FIRST (VISUAL_UPGRADE_PLAN F2) — they now drive both the
+    // headline and which baked inundation level is displayed.
+    let stats = null;
+    try {
+      stats = await getImpactStats({
+        eventType: 'sea_level_rise', iso: this.command.target,
+        year: this.year, ssp: this.ssp, center: { lon, lat },
+      });
+    } catch (_) { /* fall back to magnitude-only label */ }
+    if (this._destroyed) return;
+
+    const realRise    = stats?.raw?.seaLevelRiseM;
+    const isReal      = realRise != null && realRise > 0;
+    const displayRise = isReal ? realRise : mag;
+    const srcTag      = isReal ? ` (CMIP6 ${this.ssp})` : '';
+    const rise        = { val: 0 }; // 0→1 over 12 s — drives fills + headline count-up
+
+    // ── Flagship metro? Load REAL coastline-inundation geometry (F3) ──
+    // Baked by pipeline/bake_geodata.py from the Copernicus GLO-30 DEM.
+    // Missing file (bake not run yet) → null → generic render below.
+    const metro = findFlagshipMetro(lon, lat);
+    const doc   = metro ? await loadInundation(metro.key) : null;
+    if (this._destroyed) return;
+    const level = doc ? pickLevel(doc, displayRise) : null;
+
+    let labelLon = lon;
+    let labelLat = lat;
+    let title;
+    let extentLine = '';
+
+    if (level) {
+      // ═══ Flagship path: the delta band — land lost, on real geography ═══
+      const flagship = this._renderInundationDelta(doc, level, rise);
+      labelLon = flagship.labelLon;
+      labelLat = flagship.labelLat;
+      title = `${doc._meta.display} — Sea Level Rise`;
+      // area_km2 is pipeline-computed from the DEM (baked), safe to display.
+      extentLine = `\nshowing the ${level.levelKey} m extent — `
+        + `${level.areaKm2 != null ? `${level.areaKm2} km² of land newly under water` : 'newly inundated land'}`;
+
+      // Close-up moment (F5): once the flood fill is mostly in, fly to the
+      // lowest-lying named city we know about (South Beach moment). Fired via
+      // the tracked postRender listener so destroy() can never leak a timer.
+      const closeupCity = (stats?.nearestCities ?? [])
+        .filter((c) => c.meanElevM != null)
+        .sort((a, b) => a.meanElevM - b.meanElevM)[0] ?? null;
+      if (closeupCity) {
+        let fired = false;
+        this._addPostRenderListener(() => {
+          if (fired || this._destroyed || this._elapsed() < 7) return;
+          fired = true;
+          EventBus.emit('camera:closeup_requested', {
+            lon: closeupCity.lon, lat: closeupCity.lat,
+            name: closeupCity.name,
+          });
+        });
+      }
+    } else {
+      // ═══ Generic path (non-flagship coasts): animated fill + wave rings ═══
+      const floodR = 400_000 + mag * 80_000;
+      this._renderGenericFlood(lon, lat, floodR, rise);
+      labelLat = lat + floodR / 111_000 + 1.5;
+      const anchorCity = stats?.nearestCities?.[0]?.name ?? null;
+      title = anchorCity ? `${anchorCity} — Sea Level Rise` : 'Sea Level Rise';
+      this.viewer.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(lon, lat - 2, floodR * 2.8),
+        duration: 2.5,
+      });
+    }
+
+    // Animate rise 0→1 (drives fill alpha + the headline number).
+    this._addPostRenderListener(() => {
+      if (this._destroyed) return;
+      const t = Math.min(this._elapsed() / 12, 1);
+      rise.val = t * t * (3 - 2 * t); // smoothstep
+      this.viewer.scene.requestRender();
+    });
+
+    // Headline label — animates 0 → the real projected rise for this chapter/SSP.
+    this._track(this.viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(labelLon, labelLat),
+      label: {
+        text: new Cesium.CallbackProperty(
+          () => `${title}\n+${(displayRise * rise.val).toFixed(2)} m by ${this.year}${srcTag}${extentLine}`,
+          false),
+        font: 'bold 14px system-ui',
+        fillColor: Cesium.Color.fromCssColorString('#7dd3fc'),
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 2,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        pixelOffset: new Cesium.Cartesian2(0, -12),
+      },
+    }));
+
+    // Named city pins from cities.json — the human anchor the feedback asked for.
+    // Population only: a per-city "exposed" number would require the DEM bake
+    // (deferred), and reusing the national all-hazard fraction here would mislead.
+    for (const city of (stats?.nearestCities ?? [])) {
+      this._track(this.viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(city.lon, city.lat),
+        point: {
+          pixelSize: 7,
+          color: Cesium.Color.fromCssColorString('#fde68a'),
+          outlineColor: Cesium.Color.fromCssColorString('#78350f'),
+          outlineWidth: 1,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+        label: {
+          text: `${city.name}\n${fmtCount(city.population)} people`,
+          font: '11px system-ui',
+          fillColor: Cesium.Color.fromCssColorString('#fef3c7'),
+          outlineColor: Cesium.Color.BLACK,
+          outlineWidth: 2,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          verticalOrigin: Cesium.VerticalOrigin.TOP,
+          pixelOffset: new Cesium.Cartesian2(0, 8),
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      }));
+    }
+  }
+
+  /**
+   * Flagship inundation: render the baked delta band (land dry today, under
+   * water at the shown rise level) as real polygons hugging the coastline.
+   * Water-blue fill animating in + bright delta outline.
+   *
+   * @param {Object} doc   - slr_<metro>.json
+   * @param {Object} level - pickLevel() result
+   * @param {{val:number}} rise - shared 0→1 animation driver
+   * @returns {{labelLon:number, labelLat:number}}
+   */
+  _renderInundationDelta(doc, level, rise) {
+    // Cap ring count — a metro bake can produce many islets; the largest
+    // rings carry the story and the 30fps budget matters more than islet #61.
+    const MAX_RINGS = 60;
+    const rings = level.rings.slice(0, MAX_RINGS);
+
+    const fillColor = Cesium.Color.fromCssColorString('#1d7dd8');
+    const lineColor = Cesium.Color.fromCssColorString('#7dd3fc');
+
+    for (const ring of rings) {
+      const flat = [];
+      for (const [rlon, rlat] of ring) flat.push(rlon, rlat);
+      this._track(this.viewer.entities.add({
+        polygon: {
+          hierarchy: new Cesium.PolygonHierarchy(
+            Cesium.Cartesian3.fromDegreesArray(flat)),
+          material: new Cesium.ColorMaterialProperty(
+            new Cesium.CallbackProperty(
+              () => fillColor.withAlpha(rise.val * 0.58), false)),
+          outline: true,
+          outlineColor: new Cesium.CallbackProperty(
+            () => lineColor.withAlpha(0.25 + rise.val * 0.6), false),
+          outlineWidth: 2,
+          height: 0,
+        },
+      }));
+    }
+
+    // Frame the metro (bbox baked alongside the geometry)
+    const [w, s, e, n] = doc.bbox;
+    this.viewer.camera.flyTo({
+      destination: Cesium.Rectangle.fromDegrees(w - 0.15, s - 0.1, e + 0.15, n + 0.1),
+      duration: 2.8,
+      easingFunction: Cesium.EasingFunction.QUADRATIC_IN_OUT,
+    });
+
+    return {
+      labelLon: doc.center.lon,
+      labelLat: doc.bbox[3] + 0.06, // just north of the frame
+    };
+  }
+
+  /**
+   * Generic sea-level visual for coasts without baked geometry:
+   * the previous ellipse fill + surge + expanding wave rings, unchanged.
+   */
+  _renderGenericFlood(lon, lat, floodR, rise) {
     // Main flood zone
     this._track(this.viewer.entities.add({
       position: Cesium.Cartesian3.fromDegrees(lon, lat),
@@ -381,35 +562,6 @@ export class ActiveSimulation {
         },
       }));
     }
-
-    // Dynamic label showing current rise
-    this._track(this.viewer.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(lon, lat + floodR / 111_000 + 1.5),
-      label: {
-        text: new Cesium.CallbackProperty(
-          () => `Sea Level Rise\n+${(mag * rise.val).toFixed(1)} m`, false),
-        font: 'bold 14px system-ui',
-        fillColor: Cesium.Color.fromCssColorString('#7dd3fc'),
-        outlineColor: Cesium.Color.BLACK,
-        outlineWidth: 2,
-        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        pixelOffset: new Cesium.Cartesian2(0, -12),
-      },
-    }));
-
-    this._addPostRenderListener(() => {
-      if (this._destroyed) return;
-      const t = Math.min(this._elapsed() / 12, 1);
-      rise.val = t * t * (3 - 2 * t); // smoothstep
-      this.viewer.scene.requestRender();
-    });
-
-    this.viewer.camera.flyTo({
-      destination: Cesium.Cartesian3.fromDegrees(lon, lat - 2, floodR * 2.8),
-      duration: 2.5,
-    });
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -708,11 +860,38 @@ export class ActiveSimulation {
       }));
     }
 
-    const tempLabel = `+${(mag * 2.5).toFixed(1)}°C anomaly`;
+    // ── Label reads BAKED data (VISUAL_UPGRADE_PLAN §3.4) ──
+    // heat_days_gt35c + temperature_anomaly_c are already in climate.json;
+    // the old `mag × 2.5 °C` label was the exact fabricated-stat failure mode
+    // CLAUDE.md warns about. Falls back to an anomaly-free label if baked data
+    // is missing — never back to a synthesized number.
+    let stats = null;
+    try {
+      stats = await getImpactStats({
+        eventType: 'heatwave', iso: this.command.target,
+        year: this.year, ssp: this.ssp, center: { lon, lat },
+      });
+    } catch (_) { /* label falls back below */ }
+    if (this._destroyed) return;
+
+    const anomaly  = stats?.raw?.tempAnomalyC;
+    const heatDays = stats?.raw?.heatDaysGt35c;
+    const lines = ['Heatwave'];
+    if (anomaly != null) {
+      lines[0] = `Heatwave  ${anomaly >= 0 ? '+' : ''}${anomaly.toFixed(1)}°C anomaly (CMIP6 ${this.ssp})`;
+    }
+    if (heatDays != null) {
+      lines.push(`${Math.round(heatDays)} days over 35 °C per year by ${this.year}`);
+    }
+    const anchorCity = stats?.nearestCities?.[0];
+    if (anchorCity) {
+      lines.push(`${anchorCity.name} — ${fmtCount(anchorCity.population)} people`);
+    }
+
     this._track(this.viewer.entities.add({
       position: Cesium.Cartesian3.fromDegrees(lon, lat + radius / 111_000 + 1.5),
       label: {
-        text: `Heatwave  ${tempLabel}`,
+        text: lines.join('\n'),
         font: 'bold 14px system-ui',
         fillColor: Cesium.Color.fromCssColorString('#fca5a5'),
         outlineColor: Cesium.Color.BLACK,

@@ -20,5 +20,11 @@
     "full_name": "NOAA LOCA2 Downscaled Projections",
     "license": "US Government Public Domain",
     "url": "https://loca.ucsd.edu"
+  },
+  "GeoNames": {
+    "full_name": "GeoNames geographical database (city names, coordinates, population)",
+    "license": "CC BY 4.0",
+    "url": "https://www.geonames.org",
+    "note": "cities.json currently holds approximate published figures pending a full GeoNames bake via pipeline/fetch_cities.py"
   }
 }

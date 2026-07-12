@@ -25,7 +25,7 @@ care about.
 
 | Layer | Choice | Why |
 |---|---|---|
-| Globe renderer | CesiumJS (open source, no Cesium ion) | Globe-native, time-dynamic, WMTS support |
+| Globe renderer | CesiumJS + Cesium ion (World Terrain via `VITE_CESIUM_ION_TOKEN`; flat-ellipsoid fallback without token) | Globe-native, time-dynamic, WMTS support, real 3D elevation |
 | Build | Vite 5 | Fast HMR, ESM, env var injection |
 | NLP parser | Claude Haiku (claude-haiku-4-5-20251001) | Fast, cheap, structured JSON output |
 | API proxy | Supabase Edge Functions | Keys never reach the browser |
@@ -129,6 +129,7 @@ These are non-negotiable rules. Never violate them.
 | `simulation:complete` | ActiveSimulation → UI | `{ eventType }` |
 | `chat:query` | ChatInterface → TelemetryService | `{ text, sessionId }` |
 | `session:start` | main.js → TelemetryService | `{ sessionId }` |
+| `consent:changed` | ConsentState → TelemetryService | `{ granted: boolean }` |
 | `report:export_requested` | ChatInterface → ExportService | `{ type, report }` |
 | `quiz:started` | ChatInterface → TelemetryService | `{ context }` |
 | `quiz:completed` | ChatInterface → TelemetryService | `{ score, pct }` |
@@ -244,8 +245,9 @@ conflict+flood, flood+epidemic_outbreak, hurricane+sea_level_rise, and more.
 ## Security Architecture
 
 - **API keys never reach the browser.** ScenarioParser → Supabase Edge Function → Anthropic.
-- **Supabase Row Level Security:** anon key = INSERT only. SELECT requires service role key (server-side only).
-- **Admin session viewer** requires Supabase Auth (magic link to operator email).
+- **Supabase Row Level Security:** anon key = INSERT only on `telemetry_events`. SELECT requires the service role key or the authenticated operator (magic-link policy). Verified over REST 2026-07-05.
+- **Admin session viewer:** gated by Supabase Auth magic link (2026-07-05) — `signInWithOtp` with `shouldCreateUser: false`, reads via the operator's JWT; the service role key never enters the browser. Not in `dist/`. ADMIN_SETUP completed + end-to-end verified 2026-07-06 (operator user, redirect allow-list, operator SELECT policy; anon key re-proven SELECT `[]`, UPDATE/DELETE 0 rows).
+- **Telemetry consent gate (2026-07-05):** no Supabase write before the user accepts the consent banner; decline = telemetry off for the session. Consent flag in localStorage is the single approved exception (see DECISIONS.md amendment); single source `src/core/ConsentState.js`.
 - **SimulationCommand schema validation** before any command is emitted to EventBus.
 - **Input sanitization:** `_addMessage` uses `textContent` everywhere (not innerHTML).
   DOMPurify required before any markdown/HTML rendering is added.
@@ -268,6 +270,7 @@ All `.env.local` variables available locally. VS Code + Vite extension for HMR.
 
 **Deploy flow:** push to `main` → GitHub Actions validates → Netlify auto-builds and deploys.
 No manual deploy steps required.
+**Production URL:** `https://chipper-faun-a051b1.netlify.app` (live since 2026-07-05).
 
 ---
 
@@ -280,37 +283,53 @@ No manual deploy steps required.
 | M2 | ✅ Complete | Chat → SimulationCommand flow with API proxy (rolling 10-turn history included) |
 | M3 | ✅ Complete | Real CMIP6 data baked (246 countries, validated); Temperature/SeaLevel/Precipitation layers live |
 | M4 | ✅ Complete | All 6 "ready" event renders live in ActiveSimulation.js (hurricane, sea level, wildfire, drought, heatwave, conflict) |
-| M5 | 🔧 In progress | TelemetryService done; RLS policies + admin viewer auth unverified |
+| M5 | ✅ Complete | TelemetryService + consent gate done; RLS verified (anon INSERT-only); admin viewer magic-link gate live — ADMIN_SETUP done + full flow verified 2026-07-06 (magic-link sign-in, Load Sessions renders real session stories, anon SELECT/UPDATE/DELETE still blocked) |
 | M6 | ✅ Complete | Quiz + report card + ExportService (HTML export, print-to-PDF ready) |
 
 ---
 
 ## Open Action Items
 
-Updated 2026-07-03 after a full code audit. (Edge function, pipeline fetchers, SCHEMA.md,
+Updated 2026-07-05 after the deploy + RLS verification pass. (Edge function, pipeline fetchers, SCHEMA.md,
 ExportService, eject button, CSP headers, and rolling conversation history are all done.)
 
 **Launch blockers**
 
-1. **Privacy policy + Terms of Service + telemetry consent notice** — required before any public traffic. Telemetry stores full chat text remotely, and the system prompt actively invites emotional/personal context — disclosure is mandatory, not optional.
-2. **Data source attribution UI** — `public/data/attribution.json` exists but is invisible in the UI. Required for CC BY 4.0 compliance.
-3. **Supabase RLS policies** — verify anon key = INSERT only on the telemetry table before telemetry goes live.
-4. **Admin session viewer auth** — verify the Supabase Auth gate on `admin/session_viewer.html` before deploy.
-5. **Cost controls** — Anthropic spend cap; max query length in the edge function (none today = abuse vector); set `ALLOWED_ORIGIN` on the deployed function (defaults to `*`).
+1. ~~**Privacy policy + Terms of Service + telemetry consent notice**~~ ✅ Built 2026-07-05: first-visit consent banner (`src/ui/ConsentBanner.js`); TelemetryService buffers pre-consent, flushes on accept, drops on decline — no Supabase write before accept; decline keeps the app fully working with telemetry off for the session. Consent flag = the one approved localStorage use (`earthsim.telemetryConsent`, single source `src/core/ConsentState.js`, new `consent:changed` EventBus event; DECISIONS.md amended). `public/privacy.html` + `public/terms.html` drafted, linked from banner + footer. Redeployed to Netlify + banner verified working in production 2026-07-06. ⚠ Remaining: legal review of the copy.
+2. ~~**Data source attribution UI**~~ ✅ Built 2026-07-05: "About the data" footer link → modal (`src/ui/AttributionModal.js`) rendering `attribution.json`; textContent-only. Redeployed 2026-07-06 — CC BY 4.0 satisfied.
+3. ~~**Supabase RLS policies**~~ ✅ Verified 2026-07-05. Finding: the `telemetry_events` table did NOT exist — all telemetry inserts had been failing silently. Created via SQL editor (`id` identity PK, `"sessionId"` text, `"timestamp"` timestamptz, `event` text, `payload` jsonb, `inserted_at` timestamptz); RLS enabled; single anon INSERT-only policy. Proven over REST with the anon key: INSERT 201, SELECT returns `[]`, UPDATE/DELETE affect 0 rows. (Leftover test row: sessionId `rls-test-2026-07-05`.)
+4. ~~**Admin session viewer — auth decision**~~ ✅ Decided + built 2026-07-05: magic-link gate. `admin/session_viewer.html` rewritten — Supabase Auth `signInWithOtp` (`shouldCreateUser: false`), reads with the signed-in operator's JWT; the service role key never enters the browser (paste-key flow removed; also fixed an innerHTML XSS from telemetry chat text). Still not in `dist/`. ADMIN_SETUP completed + verified end-to-end 2026-07-06: magic-link sign-in works, Load Sessions renders real session stories via the operator JWT, and the anon key re-proven blocked (SELECT `[]`, UPDATE/DELETE 0 rows).
+5. **Cost controls** — remaining: Anthropic spend cap in the console. Done: max query length enforced in the edge function; `ALLOWED_ORIGIN` set 2026-07-05 to `https://chipper-faun-a051b1.netlify.app` (was `*`) and function redeployed.
 
 **Missing core product**
 
 6. ~~**Region interaction**~~ ✅ Built 2026-07-03: `RegionPicker.js` (click/hover picking on an invisible boundary layer, selection highlight) + `CountryPanel.js` (slide-in inspector consuming climate.json + worldbank.json) + `#country-panel` element/CSS in index.html. `region_inspect` chat commands now fly to the country and open the panel. `WorldStateAnalytics.js` was retired 2026-07-03 — it expected V1's synthesized world-state metrics (systemicStress, migrationPressure…) that V2 never computes; recover from git history if a synthesis layer is ever built.
-7. ~~**System prompt out of sync with EVENT_TYPES**~~ ✅ Fixed 2026-07-03: all 12 missing events added to the prompt + solar_storm honest-scope rule + earthquake/volcanic climate-framing rule; synced to the edge function (verified via `npm run sync-prompt` — "already up to date"). **Redeploy still required:** `npx supabase functions deploy parse-scenario`.
+7. ~~**System prompt out of sync with EVENT_TYPES**~~ ✅ Fixed 2026-07-03: all 12 missing events added to the prompt + solar_storm honest-scope rule + earthquake/volcanic climate-framing rule; synced to the edge function (verified via `npm run sync-prompt` — "already up to date"). Deployed 2026-07-05 (CLI logged in + linked, project `silryqzempbblleqaokv`); the stored `ANTHROPIC_API_KEY` secret (2026-06-18) was invalid (Anthropic 401 → 502) and was replaced with the current key. Live test: 200 + valid SimulationCommand.
 8. **scenario_compare / timeline_jump have no globe behavior** — EventSimulator handles `climate_event` and `region_inspect` only. (timeline_jump partially works: ChatInterface snaps the chapter when the command carries a year.)
+
+**Visual & contextual upgrade program (added 2026-07-03)**
+
+See `VISUAL_UPGRADE_PLAN.md` for the full plan. Origin: environmental-scientist
+feedback — renders are abstract centroid ellipses with LLM-synthesized stats; they
+need real coastline/boundary geometry, named cities, real population counts, and
+baked-data statistics. Committed to Cesium ion (terrain + OSM Buildings).
+
+14. **Foundations:** ✅ Phase 0 built 2026-07-06 — `src/data/ImpactStats.js` (all displayed hazard stats from baked climate.json/worldbank.json/cities.json with source tags, never the LLM; graceful fallback on miss), `public/data/cities.json` (69-city placeholder — approximate published figures; regenerate via new `pipeline/fetch_cities.py` from GeoNames when network available), `src/data/HumanScale.js` (deterministic rise→height / population→known-city / area→Manhattan copy). Wired into the sea-level render (real `sea_level_rise_m` label + named city pins) and ChatInterface (`_renderImpactStats` "By the numbers" card for `climate_event`, with honest-limits caveats). GeoNames added to attribution.json. ⚠ Remaining: `bake_geodata.py` (inundation polygons, land/cropland masks, admin-1 boundaries — needs DEM access), city close-up camera + OSM Buildings toggle. Also fixed 2026-07-06: `public/data/climate.json` had been truncated (mid-ZWE) — restored from the intact `dist` copy (246 countries).
+15. **Per-event upgrades, priority order:** sea level rise (⏳ real stats + named city pins live 2026-07-06 via ImpactStats; **coastline inundation delta polygon still deferred** — needs the DEM bake, blue flood shape is the interim geometry) → heatwave (near-free: `heat_days_gt35c` already baked; ImpactStats already selects it) → hurricane (historical-analog tracks + surge) → drought (admin-1 choropleth; `drought_index` bake fixed 2026-07-05: 0.6 × precip deficit + 0.4 × evaporative-demand term, re-baked + validated) → wildfire (land mask + smoke drift) → conflict (named-place displacement arcs, analog framing required).
+16. **Extend the same pattern to `schema`-tier (19) and `noted`-tier (10) events** as each gets built — polygon-anchored geometry + ImpactStats + city callouts is the template, not a per-event one-off.
 
 **Known bugs (open)**
 
-9. **CSP `frame-src 'none'`** in `public/_headers` may blank the ExportService modal (sandboxed `srcdoc` iframe) in production. Verify on Netlify; fall back to `frame-src 'self'` or a Blob-URL tab if blank.
-10. **`session_end` telemetry is lost on unload** — async Supabase insert inside `beforeunload`; switch to `navigator.sendBeacon` or `fetch(..., { keepalive: true })`.
-11. **`simulation:complete` is never emitted** — simulations run until evicted/ejected. Either implement a natural end or remove the event from the taxonomy.
-12. **ActiveSimulation duplicates a centroid table** — should import from `RegionCentroids.js` (single-source rule).
 13. **Sparse data disclosure in UI** — layers grey-fill sparse-tier countries but there's no user-facing notice. Current bake is all-"high" tier, so low priority.
+
+**Fixed / closed 2026-07-04 → 2026-07-05**
+
+- Bugs #9–#12 were already implemented in code (verified 2026-07-04: clean build + `npm run verify` pass): CSP relaxed to `frame-src 'self' blob: about:` (+ "Open in tab" fallback); `session_end` uses keepalive delivery; `simulation:complete` taxonomy resolved; ActiveSimulation imports centroids from `RegionCentroids.js`.
+- `ssp:changed` now emitted by `TimeController.setSSP()` (2026-07-04) — TelemetryService subscribed to it but it was never fired; SSP switches were missing from session stories.
+- Edge function `parse-scenario` deployed with fresh `ANTHROPIC_API_KEY`; live test 200 + valid SimulationCommand (2026-07-05).
+- `ALLOWED_ORIGIN` locked to the production Netlify URL (2026-07-05).
+- Netlify production deploy live at `https://chipper-faun-a051b1.netlify.app` (full `dist/` from `npm run build`; first attempt was index.html-only, fixed). Bundle/data/CSP headers verified via HTTP probe. Export-modal + live-chat manual checks still pending.
+- `telemetry_events` table created + RLS verified anon INSERT-only (2026-07-05) — see launch-blocker #3.
 
 **Fixed in the 2026-07-03 audit**
 
@@ -352,13 +371,4 @@ ExportService, eject button, CSP headers, and rolling conversation history are a
 > "Start Milestone 1: implement GlobeRenderer.js to render a working CesiumJS globe with NASA GIBS tiles, wire the chapter timeline in main.js, and make the SSP toggle functional. Reference CLAUDE.md for architecture rules."
 
 **To implement the Supabase Edge Function proxy:**
-> "Implement the Supabase Edge Function at supabase/functions/parse-scenario/index.ts. It receives { query, year, ssp } from the frontend, calls the Anthropic API with SCENARIO_PARSER_SYSTEM_PROMPT from SimulationCommand.js, validates the response against the SimulationCommand schema, and returns the validated command. See CLAUDE.md security section."
-
-**To start the Python pipeline:**
-> "Write pipeline/fetch_cmip6.py. It should download CMIP6 SSP2-4.5 and SSP5-8.5 ensemble means for temperature anomaly, sea level rise, and precipitation change for all 195 UN member states for chapters 2025, 2050, 2075, 2100. Output to public/data/climate.json following the schema in validate.py FIELD_BOUNDS. See CLAUDE.md data sources section."
-
-**To implement a specific event render (Milestone 4):**
-> "Implement the hurricane render in ActiveSimulation._renderParticleSpiral(). Use a CesiumJS ParticleSystem centered on command.params.center. The spiral should rotate inward, particle velocity should scale with command.params.magnitude. Reference the Sandcastle example at https://sandcastle.cesium.com/?src=Particle%20System.html. See ActiveSimulation.js for the _track() utility and destroy() memory management contract."
-
-**To add a new compound relationship:**
-> "Add a compound relationship between [event A] and [event B] to CompoundEffectsResolver.js. Research the actual mechanism of how these events interact, include a real historical case study in chatPrompt, and define plausible amplification multipliers. Follow the existing pattern in COMPOUND_MAP."
+> "Implement the Supabase Edge Function at supabase/functions/parse-scenario/index.ts. It receives { query, year, ssp } from the frontend, calls the Anthropic API with SCENARIO_PARSER_SYSTEM_PROMPT from SimulationCommand.js, valida

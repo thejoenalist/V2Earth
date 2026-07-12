@@ -23,6 +23,8 @@ import { TelemetryService } from './analytics/TelemetryService.js';
 import { ExportService } from './export/ExportService.js';
 import { RegionPicker } from './globe/RegionPicker.js';
 import { CountryPanel } from './ui/CountryPanel.js';
+import { ConsentBanner } from './ui/ConsentBanner.js';
+import { AttributionModal } from './ui/AttributionModal.js';
 
 /** App-wide session ID — shared by ChatInterface and TelemetryService. */
 export let sessionId = crypto.randomUUID();
@@ -90,6 +92,12 @@ function wireSSPToggle() {
 buildTimeline();
 wireSSPToggle();
 updateActiveChapter(timeController.year);
+
+// Consent banner + attribution modal — pure UI, no globe dependency.
+// The banner must exist before TelemetryService starts logging so the
+// pre-consent buffer/drop semantics apply from the first event.
+new ConsentBanner();
+new AttributionModal();
 
 document.getElementById('onboarding-start')?.addEventListener('click', () => {
   document.getElementById('onboarding')?.classList.add('hidden');
@@ -178,6 +186,16 @@ document.getElementById('onboarding-start')?.addEventListener('click', () => {
     updateActiveChapter(year);
     globeRenderer.applyChapterAesthetic(year);
   });
+
+  // Cinematic city close-up (VISUAL_UPGRADE_PLAN F5): flagship renders ask for
+  // it mid-simulation; the globe owns the camera + OSM Buildings toggle.
+  // Any layer teardown restores the global view contract.
+  EventBus.on('camera:closeup_requested', ({ lon, lat }) => {
+    globeRenderer.cityCloseUp(lon, lat).catch((err) =>
+      console.warn('[main] cityCloseUp failed:', err.message));
+  });
+  EventBus.on('simulation:layer_removed', () => globeRenderer.exitCloseUp());
+  EventBus.on('simulation:ejected',       () => globeRenderer.exitCloseUp());
 
   globeRenderer.applyChapterAesthetic(timeController.year);
   window.addEventListener('resize', () => globeRenderer.resize());

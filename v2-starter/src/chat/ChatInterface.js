@@ -15,6 +15,8 @@
 
 import { EventBus } from '../core/EventBus.js';
 import { ScenarioParser } from './ScenarioParser.js';
+import { getImpactStats } from '../data/ImpactStats.js';
+import { seaLevelHumanLine } from '../data/HumanScale.js';
 
 /** Escape user-supplied strings before injection into innerHTML. */
 function escapeHtml(str) {
@@ -152,6 +154,10 @@ export class ChatInterface {
     if (narrative.plan)     { this._renderResiliencePlan(narrative, command); return; }
     if (narrative.research) { this._renderResearchQuery(narrative);          return; }
 
+    // Real baked statistics for hazard events (VISUAL_UPGRADE_PLAN F2) — numbers
+    // come from climate.json/worldbank.json/cities.json, never the LLM narrative.
+    if (type === 'climate_event') this._renderImpactStats(command);
+
     // Default
     if (narrative.learned) this._addMessage('assistant', `📊 ${narrative.learned}`);
     if (narrative.action)  this._addMessage('assistant', `🔧 ${narrative.action}`);
@@ -159,6 +165,91 @@ export class ChatInterface {
     if (narrative.sources?.length) {
       this._addMessage('assistant', `Sources: ${narrative.sources.join(', ')}`);
     }
+  }
+
+  // ── Render: baked impact stats (VISUAL_UPGRADE_PLAN F2) ───────────────────
+
+  /**
+   * Factual impact-stats card for a hazard event. Every number is baked
+   * (ImpactStats) and carries a source tag; the LLM narrative is rendered
+   * separately and never supplies statistics. Async — appends when data loads.
+   * @param {import('./SimulationCommand.js').SimulationCommand} command
+   */
+  async _renderImpactStats(command) {
+    const eventType = command.params?.eventType ?? command.event ?? null;
+    if (!eventType) return;
+    const year   = command.params?.year ?? this._timeController.year;
+    const ssp    = command.params?.ssp  ?? this._timeController.ssp;
+    const center = command.params?.center ?? null;
+
+    let stats;
+    try {
+      stats = await getImpactStats({ eventType, iso: command.target, year, ssp, center });
+    } catch { return; }
+    if (!stats?.hasData) return;
+
+    const card = this._createMessageEl('assistant');
+    card.style.borderColor = 'rgba(125,211,252,0.35)';
+    card.style.background  = 'rgba(8,28,44,0.92)';
+
+    const title = document.createElement('div');
+    title.style.cssText = 'font-weight:600; color:#7dd3fc; margin-bottom:8px;';
+    title.textContent = '📊 By the numbers';
+    card.appendChild(title);
+
+    const addRow = (label, value, basis, source) => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex; justify-content:space-between; gap:12px; margin:3px 0; font-size:12px;';
+      const l = document.createElement('span');
+      l.style.color = '#9fc7dd';
+      l.textContent = basis ? `${label} · ${basis}` : label;
+      const v = document.createElement('span');
+      v.style.cssText = 'color:#e8f4fb; font-weight:600; white-space:nowrap;';
+      v.textContent = value;
+      row.append(l, v);
+      card.appendChild(row);
+      if (source) {
+        const s = document.createElement('div');
+        s.style.cssText = 'font-size:10px; color:#5a8a9a; margin:-1px 0 4px;';
+        s.textContent = source;
+        card.appendChild(s);
+      }
+    };
+
+    if (stats.headline) addRow(stats.headline.label, stats.headline.value, stats.headline.basis, stats.headline.source);
+    for (const s of stats.stats) addRow(s.label, s.value, s.basis, s.source);
+
+    // Human-scale anchor (F4) — deterministic copy, sea level for now.
+    if (eventType === 'sea_level_rise') {
+      const anchorCity = stats.nearestCities?.[0]
+        ? { name: stats.nearestCities[0].name, population: stats.nearestCities[0].population }
+        : null;
+      const human = seaLevelHumanLine({ riseM: stats.raw?.seaLevelRiseM, anchorCity });
+      if (human) {
+        const h = document.createElement('div');
+        h.style.cssText = 'margin-top:8px; padding:6px 8px; border-radius:6px; background:rgba(125,211,252,0.08); color:#bfe3f5; font-size:12px;';
+        h.textContent = `🌊 ${human}`;
+        card.appendChild(h);
+      }
+    }
+
+    if (stats.nearestCities?.length) {
+      const cities = document.createElement('div');
+      cities.style.cssText = 'margin-top:8px; font-size:11px; color:#9fc7dd;';
+      cities.textContent = 'Nearest: ' + stats.nearestCities
+        .map((c) => `${c.name} (${Math.round(c.distanceKm)} km)`).join(' · ');
+      card.appendChild(cities);
+    }
+
+    for (const caveat of (stats.caveats ?? [])) {
+      const cv = document.createElement('div');
+      cv.style.cssText = 'margin-top:6px; font-size:10.5px; color:#8a9aa5; font-style:italic;';
+      cv.textContent = `⚠ ${caveat}`;
+      card.appendChild(cv);
+    }
+
+    this._messages?.appendChild(card);
+    this._messages?.scrollTo({ top: this._messages.scrollHeight, behavior: 'smooth' });
   }
 
   // ── Render: local_action ──────────────────────────────────────────────────

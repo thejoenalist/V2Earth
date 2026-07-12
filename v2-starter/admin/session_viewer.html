@@ -6,12 +6,16 @@
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Inter', system-ui, sans-serif; background: #0a0f1a; color: #c8dff0; padding: 32px; }
-    h1 { font-size: 20px; font-weight: 600; color: #4aa8e8; margin-bottom: 24px; }
-    .controls { display: flex; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; }
+    h1 { font-size: 20px; font-weight: 600; color: #4aa8e8; margin-bottom: 8px; }
+    .subtitle { font-size: 12px; color: rgba(200,223,240,0.5); margin-bottom: 24px; }
+    .controls { display: flex; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; align-items: center; }
     input, button { padding: 8px 14px; border-radius: 8px; border: 1px solid rgba(80,160,220,0.2);
       background: rgba(8,20,32,0.9); color: #c8dff0; font-size: 13px; font-family: inherit; }
     button { cursor: pointer; background: rgba(74,168,232,0.15); }
     button:hover { background: rgba(74,168,232,0.25); }
+    button:disabled { opacity: 0.5; cursor: default; }
+    .status { font-size: 12px; color: rgba(200,223,240,0.6); }
+    .status.error { color: #e88a7a; }
     .session { background: rgba(8,20,32,0.7); border: 1px solid rgba(80,160,220,0.15);
       border-radius: 12px; padding: 20px; margin-bottom: 16px; }
     .session-header { font-size: 12px; color: #4aa8e8; margin-bottom: 12px; }
@@ -20,25 +24,153 @@
     .event-line.region_click { color: #f0c080; }
     .event-line.chapter_change { color: #a888e8; }
     .empty { color: rgba(200,223,240,0.3); font-size: 14px; margin-top: 40px; text-align: center; }
+    #auth-panel, #viewer-panel { display: none; }
+    #auth-panel.visible, #viewer-panel.visible { display: block; }
   </style>
 </head>
 <body>
   <h1>Session Viewer — Earth Simulator</h1>
+  <div class="subtitle">Operator access only — sign in with the operator email via magic link.</div>
 
-  <div class="controls">
-    <input id="supabase-url" type="text" placeholder="Supabase URL" style="width:280px" />
-    <input id="supabase-key" type="text" placeholder="Service role key" style="width:320px" />
-    <button id="load-btn">Load Sessions</button>
-    <button id="export-btn">Export JSON</button>
+  <!-- ── Auth gate ─────────────────────────────────────────────────────── -->
+  <div id="auth-panel">
+    <div class="controls">
+      <input id="supabase-url" type="text" placeholder="Supabase URL" style="width:280px" />
+      <input id="supabase-anon-key" type="text" placeholder="Anon (public) key" style="width:320px" />
+      <input id="operator-email" type="email" placeholder="Operator email" style="width:240px" />
+      <button id="send-link-btn">Send magic link</button>
+    </div>
+    <div class="status" id="auth-status">
+      Enter the project URL, anon key, and the operator email. A sign-in link will be
+      emailed to you; opening it returns here authenticated. (Requires: operator user
+      created in Supabase Auth, this page's URL in the Auth redirect allow-list, and a
+      SELECT policy for authenticated users on telemetry_events.)
+    </div>
   </div>
 
-  <div id="sessions-container">
-    <div class="empty">Enter your Supabase credentials and click Load Sessions.</div>
+  <!-- ── Viewer (visible only when authenticated) ──────────────────────── -->
+  <div id="viewer-panel">
+    <div class="controls">
+      <span class="status" id="signed-in-as"></span>
+      <button id="load-btn">Load Sessions</button>
+      <button id="export-btn">Export JSON</button>
+      <button id="signout-btn">Sign out</button>
+    </div>
+    <div id="sessions-container">
+      <div class="empty">Click Load Sessions.</div>
+    </div>
   </div>
 
-  <script>
+  <script type="module">
+    import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+    // ── Config persistence (URL + anon key are public values, not secrets;
+    //    the SERVICE ROLE KEY must never be entered on this page) ──────────
+    const CONFIG_KEY = 'earthsim.admin.viewerConfig';
+
+    const urlInput = document.getElementById('supabase-url');
+    const keyInput = document.getElementById('supabase-anon-key');
+    const emailInput = document.getElementById('operator-email');
+    const authStatus = document.getElementById('auth-status');
+    const authPanel = document.getElementById('auth-panel');
+    const viewerPanel = document.getElementById('viewer-panel');
+
+    let supabase = null;
     let _rawData = [];
 
+    function loadConfig() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(CONFIG_KEY) ?? 'null');
+        if (saved?.url) urlInput.value = saved.url;
+        if (saved?.anonKey) keyInput.value = saved.anonKey;
+        if (saved?.email) emailInput.value = saved.email;
+        return saved;
+      } catch { return null; }
+    }
+
+    function saveConfig() {
+      try {
+        localStorage.setItem(CONFIG_KEY, JSON.stringify({
+          url: urlInput.value.trim(),
+          anonKey: keyInput.value.trim(),
+          email: emailInput.value.trim(),
+        }));
+      } catch { /* non-fatal */ }
+    }
+
+    function getClient() {
+      const url = urlInput.value.trim();
+      const anonKey = keyInput.value.trim();
+      if (!url || !anonKey) return null;
+      if (!supabase) {
+        // detectSessionInUrl (default true) completes the magic-link flow when
+        // the emailed link redirects back to this page.
+        supabase = createClient(url, anonKey);
+      }
+      return supabase;
+    }
+
+    function setAuthStatus(msg, isError = false) {
+      authStatus.textContent = msg;
+      authStatus.classList.toggle('error', isError);
+    }
+
+    function showViewer(session) {
+      authPanel.classList.remove('visible');
+      viewerPanel.classList.add('visible');
+      document.getElementById('signed-in-as').textContent =
+        `Signed in as ${session.user?.email ?? 'operator'}`;
+    }
+
+    function showAuth() {
+      viewerPanel.classList.remove('visible');
+      authPanel.classList.add('visible');
+    }
+
+    // ── Magic link flow ──────────────────────────────────────────────────
+    document.getElementById('send-link-btn').addEventListener('click', async () => {
+      const client = getClient();
+      const email = emailInput.value.trim();
+      if (!client || !email) { setAuthStatus('Enter Supabase URL, anon key, and email first.', true); return; }
+      saveConfig();
+
+      // shouldCreateUser:false — only the pre-created operator user can sign in;
+      // random emails get no account and no access.
+      const { error } = await client.auth.signInWithOtp({
+        email,
+        options: {
+          shouldCreateUser: false,
+          emailRedirectTo: window.location.origin + window.location.pathname,
+        },
+      });
+      if (error) {
+        setAuthStatus(`Could not send link: ${error.message}`, true);
+      } else {
+        setAuthStatus(`Magic link sent to ${email}. Open it in this browser to return here signed in.`);
+      }
+    });
+
+    document.getElementById('signout-btn').addEventListener('click', async () => {
+      await getClient()?.auth.signOut();
+      showAuth();
+      setAuthStatus('Signed out.');
+    });
+
+    // ── Boot: restore config, then check for an existing / just-arrived session ──
+    (async () => {
+      loadConfig();
+      const client = getClient();
+      if (!client) { showAuth(); return; }
+
+      client.auth.onAuthStateChange((_event, session) => {
+        if (session) showViewer(session); else showAuth();
+      });
+
+      const { data: { session } } = await client.auth.getSession();
+      if (session) showViewer(session); else showAuth();
+    })();
+
+    // ── Data loading (authenticated user JWT — NOT the service role key) ──
     document.getElementById('load-btn').addEventListener('click', loadSessions);
     document.getElementById('export-btn').addEventListener('click', () => {
       if (!_rawData.length) return;
@@ -48,80 +180,84 @@
     });
 
     async function loadSessions() {
-      const url = document.getElementById('supabase-url').value.trim();
-      const key = document.getElementById('supabase-key').value.trim();
-      if (!url || !key) { alert('Enter Supabase URL and service role key'); return; }
-
+      const client = getClient();
       const container = document.getElementById('sessions-container');
-      container.innerHTML = '<div class="empty">Loading…</div>';
+      container.replaceChildren(emptyDiv('Loading…'));
 
       try {
-        const res = await fetch(`${url}/rest/v1/telemetry_events?order=timestamp.asc&limit=2000`, {
-          headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        _rawData = await res.json();
+        const { data, error } = await client
+          .from('telemetry_events')
+          .select('*')
+          .order('timestamp', { ascending: true })
+          .limit(2000);
+        if (error) throw new Error(error.message);
+        _rawData = data ?? [];
         renderSessions(_rawData);
       } catch (err) {
-        container.innerHTML = `<div class="empty">Error: ${err.message}</div>`;
+        container.replaceChildren(emptyDiv(`Error: ${err.message} — if this is a permissions error, add the SELECT policy for authenticated users (see ADMIN_SETUP notes in TODO.md).`));
       }
     }
 
+    // ── Rendering — textContent only; telemetry rows contain raw user chat
+    //    text and must never be interpolated into innerHTML ────────────────
+    function el(tag, className, text) {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (text !== undefined) node.textContent = text;
+      return node;
+    }
+
+    function emptyDiv(text) { return el('div', 'empty', text); }
+
     function renderSessions(events) {
       const container = document.getElementById('sessions-container');
-      if (!events.length) { container.innerHTML = '<div class="empty">No sessions found.</div>'; return; }
+      if (!events.length) { container.replaceChildren(emptyDiv('No sessions found.')); return; }
 
-      // Group by sessionId
       const sessions = new Map();
       for (const ev of events) {
         if (!sessions.has(ev.sessionId)) sessions.set(ev.sessionId, []);
         sessions.get(ev.sessionId).push(ev);
       }
 
-      container.innerHTML = '';
+      container.replaceChildren();
 
       for (const [sid, evs] of sessions) {
         const start = new Date(evs[0].timestamp);
-        const end   = new Date(evs[evs.length-1].timestamp);
+        const end   = new Date(evs[evs.length - 1].timestamp);
         const durationMin = Math.round((end - start) / 60000);
 
-        const div = document.createElement('div');
-        div.className = 'session';
-
         const queries = evs.filter(e => e.event === 'chat_query');
-        const regions = [...new Set(evs.filter(e => e.event === 'region_click').map(e => e.payload.iso))];
+        const regions = [...new Set(evs.filter(e => e.event === 'region_click').map(e => e.payload?.iso))].filter(Boolean);
 
-        div.innerHTML = `
-          <div class="session-header">
-            Session ${sid.slice(-8)} — ${start.toLocaleString()} — ${durationMin}m
-            &nbsp;·&nbsp; ${evs.length} events
-            &nbsp;·&nbsp; ${queries.length} queries
-            &nbsp;·&nbsp; Regions: ${regions.join(', ') || 'none'}
-          </div>
-          ${evs.map(ev => formatEvent(ev)).join('')}
-        `;
+        const div = el('div', 'session');
+        div.appendChild(el('div', 'session-header',
+          `Session ${String(sid).slice(-8)} — ${start.toLocaleString()} — ${durationMin}m` +
+          ` · ${evs.length} events · ${queries.length} queries · Regions: ${regions.join(', ') || 'none'}`));
+
+        for (const ev of evs) div.appendChild(formatEvent(ev));
         container.appendChild(div);
       }
     }
 
     function formatEvent(ev) {
       const t = new Date(ev.timestamp).toLocaleTimeString();
+      const p = ev.payload ?? {};
       let text = '';
 
       switch (ev.event) {
-        case 'session_start':   text = `Started (${ev.payload.viewport})`; break;
-        case 'chapter_change':  text = `→ Chapter ${ev.payload.year} (${ev.payload.ssp})`; break;
-        case 'layer_change':    text = `→ Layer: ${ev.payload.layerId}`; break;
-        case 'ssp_change':      text = `→ Pathway: ${ev.payload.ssp}`; break;
-        case 'region_click':    text = `Clicked ${ev.payload.iso}`; break;
-        case 'region_dwell':    text = `Dwelled on ${ev.payload.iso} for ${Math.round(ev.payload.durationMs/1000)}s`; break;
-        case 'chat_query':      text = `💬 "${ev.payload.text}"`; break;
-        case 'simulation_trigger': text = `⚡ Simulation: ${ev.payload.event} / ${ev.payload.iso} / ${ev.payload.year}`; break;
-        case 'session_end':     text = `Session ended (${Math.round((ev.payload.durationMs||0)/60000)}m total)`; break;
-        default: text = `${ev.event}: ${JSON.stringify(ev.payload).slice(0,60)}`;
+        case 'session_start':   text = `Started (${p.viewport ?? '?'})`; break;
+        case 'chapter_change':  text = `→ Chapter ${p.year} (${p.ssp})`; break;
+        case 'layer_change':    text = `→ Layer: ${p.layerId}`; break;
+        case 'ssp_change':      text = `→ Pathway: ${p.ssp}`; break;
+        case 'region_click':    text = `Clicked ${p.iso}`; break;
+        case 'region_dwell':    text = `Dwelled on ${p.iso} for ${Math.round((p.durationMs ?? 0) / 1000)}s`; break;
+        case 'chat_query':      text = `💬 "${p.text}"`; break;
+        case 'simulation_trigger': text = `⚡ Simulation: ${p.event} / ${p.iso} / ${p.year}`; break;
+        case 'session_end':     text = `Session ended (${Math.round((p.durationMs || 0) / 60000)}m total)`; break;
+        default:                text = `${ev.event}: ${JSON.stringify(p).slice(0, 60)}`;
       }
 
-      return `<div class="event-line ${ev.event}">${t} &nbsp; ${text}</div>`;
+      return el('div', `event-line ${ev.event}`, `${t}   ${text}`);
     }
   </script>
 </body>

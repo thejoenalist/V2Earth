@@ -9,10 +9,17 @@
  *
  * All events are non-blocking. Failures are silently swallowed —
  * telemetry must never affect the user experience.
+ *
+ * Consent gate (launch blocker #1): NOTHING is written to Supabase until the
+ * user accepts the consent banner (consent:changed / ConsentState.js).
+ *   - undecided → entries buffer in memory only
+ *   - accepted  → buffer flushes, live entries flush immediately
+ *   - declined  → buffer is dropped; nothing is sent for the whole session
  */
 
 import { EventBus } from '../core/EventBus.js';
 import { getSupabaseOrigin } from '../core/supabaseClient.js';
+import { getConsent } from '../core/ConsentState.js';
 
 const SUPABASE_URL = getSupabaseOrigin(import.meta.env.VITE_SUPABASE_URL ?? '');
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY ?? '';
@@ -35,6 +42,23 @@ export class TelemetryService {
     this._activeRegion = null;
     this._regionEnteredAt = null;
     this._enabled = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
+
+    /** Entries logged before the user decided on consent (memory only). */
+    this._preConsentBuffer = [];
+    /** true = accepted, false = declined, null = undecided. */
+    this._consent = getConsent();
+
+    this._onConsentChanged = ({ granted }) => {
+      this._consent = granted;
+      if (granted) {
+        const buffered = this._preConsentBuffer;
+        this._preConsentBuffer = [];
+        for (const entry of buffered) this._flush(entry);
+      } else {
+        this._preConsentBuffer = [];
+      }
+    };
+    EventBus.on('consent:changed', this._onConsentChanged);
 
     this._wireEventBus();
     this._log('session_start', { referrer: document.referrer || null, viewport: `${window.innerWidth}x${window.innerHeight}` });
@@ -79,7 +103,13 @@ export class TelemetryService {
       payload,
     };
     this._events.push(entry);
-    this._flush(entry);
+
+    if (this._consent === true) {
+      this._flush(entry);
+    } else if (this._consent === null) {
+      this._preConsentBuffer.push(entry);
+    }
+    // declined → drop: nothing leaves the browser this session
   }
 
   _onSessionEnd() {

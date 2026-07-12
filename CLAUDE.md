@@ -25,7 +25,7 @@ care about.
 
 | Layer | Choice | Why |
 |---|---|---|
-| Globe renderer | CesiumJS (open source, no Cesium ion) | Globe-native, time-dynamic, WMTS support |
+| Globe renderer | CesiumJS + Cesium ion (World Terrain via `VITE_CESIUM_ION_TOKEN`; flat-ellipsoid fallback without token) | Globe-native, time-dynamic, WMTS support, real 3D elevation |
 | Build | Vite 5 | Fast HMR, ESM, env var injection |
 | NLP parser | Claude Haiku (claude-haiku-4-5-20251001) | Fast, cheap, structured JSON output |
 | API proxy | Supabase Edge Functions | Keys never reach the browser |
@@ -129,7 +129,9 @@ These are non-negotiable rules. Never violate them.
 | `simulation:complete` | ActiveSimulation → UI | `{ eventType }` |
 | `chat:query` | ChatInterface → TelemetryService | `{ text, sessionId }` |
 | `session:start` | main.js → TelemetryService | `{ sessionId }` |
+| `consent:changed` | ConsentState → TelemetryService | `{ granted: boolean }` |
 | `report:export_requested` | ChatInterface → ExportService | `{ type, report }` |
+| `camera:closeup_requested` | ActiveSimulation → main.js (GlobeRenderer) | `{ lon, lat, name }` |
 | `quiz:started` | ChatInterface → TelemetryService | `{ context }` |
 | `quiz:completed` | ChatInterface → TelemetryService | `{ score, pct }` |
 
@@ -244,8 +246,9 @@ conflict+flood, flood+epidemic_outbreak, hurricane+sea_level_rise, and more.
 ## Security Architecture
 
 - **API keys never reach the browser.** ScenarioParser → Supabase Edge Function → Anthropic.
-- **Supabase Row Level Security:** anon key = INSERT only. SELECT requires service role key (server-side only).
-- **Admin session viewer** requires Supabase Auth (magic link to operator email).
+- **Supabase Row Level Security:** anon key = INSERT only on `telemetry_events`. SELECT requires the service role key or the authenticated operator (magic-link policy). Verified over REST 2026-07-05.
+- **Admin session viewer:** gated by Supabase Auth magic link (2026-07-05) — `signInWithOtp` with `shouldCreateUser: false`, reads via the operator's JWT; the service role key never enters the browser. Not in `dist/`. ADMIN_SETUP completed + end-to-end verified 2026-07-06 (operator user, redirect allow-list, operator SELECT policy; anon key re-proven SELECT `[]`, UPDATE/DELETE 0 rows).
+- **Telemetry consent gate (2026-07-05):** no Supabase write before the user accepts the consent banner; decline = telemetry off for the session. Consent flag in localStorage is the single approved exception (see DECISIONS.md amendment); single source `src/core/ConsentState.js`.
 - **SimulationCommand schema validation** before any command is emitted to EventBus.
 - **Input sanitization:** `_addMessage` uses `textContent` everywhere (not innerHTML).
   DOMPurify required before any markdown/HTML rendering is added.
@@ -268,6 +271,7 @@ All `.env.local` variables available locally. VS Code + Vite extension for HMR.
 
 **Deploy flow:** push to `main` → GitHub Actions validates → Netlify auto-builds and deploys.
 No manual deploy steps required.
+**Production URL:** `https://chipper-faun-a051b1.netlify.app` (live since 2026-07-05).
 
 ---
 
@@ -280,7 +284,7 @@ No manual deploy steps required.
 | M2 | ✅ Complete | Chat → SimulationCommand flow with API proxy (rolling 10-turn history included) |
 | M3 | ✅ Complete | Real CMIP6 data baked (246 countries, validated); Temperature/SeaLevel/Precipitation layers live |
 | M4 | ✅ Complete | All 6 "ready" event renders live in ActiveSimulation.js (hurricane, sea level, wildfire, drought, heatwave, conflict) |
-| M5 | 🔧 In progress | TelemetryService done; RLS policies + admin viewer auth unverified |
+| M5 | ✅ Complete | TelemetryService + consent gate done; RLS verified (anon INSERT-only); admin viewer magic-link gate live — ADMIN_SETUP done + full flow verified 2026-07-06 (magic-link sign-in, Load Sessions renders real session stories, anon SELECT/UPDATE/DELETE still blocked) |
 | M6 | ✅ Complete | Quiz + report card + ExportService (HTML export, print-to-PDF ready) |
 
 **Note:** all app code lives in `v2-starter/` — the repo-structure paths above are relative to that directory.
@@ -289,29 +293,47 @@ No manual deploy steps required.
 
 ## Open Action Items
 
-Updated 2026-07-03 after a full code audit.
+Updated 2026-07-05 after the deploy + RLS verification pass.
 
 **Launch blockers**
 
-1. **Privacy policy + Terms of Service + telemetry consent notice** — required before any public traffic. Telemetry stores full chat text remotely, and the system prompt actively invites emotional/personal context — disclosure is mandatory, not optional.
-2. **Data source attribution UI** — `public/data/attribution.json` exists but is invisible in the UI. Required for CC BY 4.0 compliance.
-3. **Supabase RLS policies** — verify anon key = INSERT only on the telemetry table before telemetry goes live.
-4. **Admin session viewer auth** — verify the Supabase Auth gate on `admin/session_viewer.html` before deploy.
-5. **Cost controls** — Anthropic spend cap; max query length in the edge function (none today = abuse vector); set `ALLOWED_ORIGIN` on the deployed function (defaults to `*`).
+1. ~~**Privacy policy + Terms of Service + telemetry consent notice**~~ ✅ Built 2026-07-05: first-visit consent banner (`src/ui/ConsentBanner.js`); TelemetryService buffers pre-consent, flushes on accept, drops on decline — no Supabase write before accept; decline keeps the app fully working with telemetry off for the session. Consent flag = the one approved localStorage use (`earthsim.telemetryConsent`, single source `src/core/ConsentState.js`, new `consent:changed` EventBus event; DECISIONS.md amended). `public/privacy.html` + `public/terms.html` drafted, linked from banner + footer. Redeployed to Netlify + banner verified working in production 2026-07-06. ⚠ Remaining: legal review of the copy.
+2. ~~**Data source attribution UI**~~ ✅ Built 2026-07-05: "About the data" footer link → modal (`src/ui/AttributionModal.js`) rendering `attribution.json`; textContent-only. Redeployed 2026-07-06 — CC BY 4.0 satisfied.
+3. ~~**Supabase RLS policies**~~ ✅ Verified 2026-07-05. Finding: the `telemetry_events` table did NOT exist — all telemetry inserts had been failing silently. Created via SQL editor (`id` identity PK, `"sessionId"` text, `"timestamp"` timestamptz, `event` text, `payload` jsonb, `inserted_at` timestamptz); RLS enabled; single anon INSERT-only policy. Proven over REST with the anon key: INSERT 201, SELECT returns `[]`, UPDATE/DELETE affect 0 rows. (Leftover test row: sessionId `rls-test-2026-07-05`.)
+4. ~~**Admin session viewer — auth decision**~~ ✅ Decided + built 2026-07-05: magic-link gate. `admin/session_viewer.html` rewritten — Supabase Auth `signInWithOtp` (`shouldCreateUser: false`), reads with the signed-in operator's JWT; the service role key never enters the browser (paste-key flow removed; also fixed an innerHTML XSS from telemetry chat text). Still not in `dist/`. ADMIN_SETUP completed + verified end-to-end 2026-07-06: magic-link sign-in works, Load Sessions renders real session stories via the operator JWT, and the anon key re-proven blocked (SELECT `[]`, UPDATE/DELETE 0 rows).
+5. **Cost controls** — remaining: Anthropic spend cap in the console. Done: max query length enforced in the edge function; `ALLOWED_ORIGIN` set 2026-07-05 to `https://chipper-faun-a051b1.netlify.app` (was `*`) and function redeployed.
 
 **Missing core product**
 
 6. ~~**Region interaction**~~ ✅ Built 2026-07-03: `RegionPicker.js` (click/hover picking on an invisible boundary layer, selection highlight) + `CountryPanel.js` (slide-in inspector consuming climate.json + worldbank.json) + `#country-panel` element/CSS in index.html. `region_inspect` chat commands now fly to the country and open the panel. `WorldStateAnalytics.js` was retired 2026-07-03 — it expected V1's synthesized world-state metrics (systemicStress, migrationPressure…) that V2 never computes; recover from git history if a synthesis layer is ever built.
-7. ~~**System prompt out of sync with EVENT_TYPES**~~ ✅ Fixed 2026-07-03: all 12 missing events added to the prompt + solar_storm honest-scope rule + earthquake/volcanic climate-framing rule; synced to the edge function (verified via `npm run sync-prompt` — "already up to date"). **Redeploy still required:** `npx supabase functions deploy parse-scenario`.
+7. ~~**System prompt out of sync with EVENT_TYPES**~~ ✅ Fixed 2026-07-03: all 12 missing events added to the prompt + solar_storm honest-scope rule + earthquake/volcanic climate-framing rule; synced to the edge function (verified via `npm run sync-prompt` — "already up to date"). Deployed 2026-07-05 (CLI logged in + linked, project `silryqzempbblleqaokv`); the stored `ANTHROPIC_API_KEY` secret (2026-06-18) was invalid (Anthropic 401 → 502) and was replaced with the current key. Live test: 200 + valid SimulationCommand.
 8. **scenario_compare / timeline_jump have no globe behavior** — EventSimulator handles `climate_event` and `region_inspect` only. (timeline_jump partially works: ChatInterface snaps the chapter when the command carries a year.)
+
+**Visual & contextual upgrade program (added 2026-07-03)**
+
+See `v2-starter/VISUAL_UPGRADE_PLAN.md` for the full plan. Origin: environmental-scientist
+feedback — renders are abstract centroid ellipses with LLM-synthesized stats; they
+need real coastline/boundary geometry, named cities, real population counts, and
+baked-data statistics. Committed to Cesium ion (terrain + OSM Buildings).
+
+14. **Foundations:** `cities.json` bake, `ImpactStats.js` (all displayed stats from baked data, never the LLM), human-scale comparison copy, `bake_geodata.py` (inundation polygons, land/cropland masks, admin-1 boundaries), city close-up camera + OSM Buildings toggle.
+    *Progress 2026-07-11 (V3 day, see `v2-starter/V3_DAY_PLAN.md`):* `cities.json` regenerated with 1,006 real cities (Natural Earth populated places via GitHub sparse clone — GeoNames path kept for CI; hand-authored coastal enrichment carried forward). `bake_geodata.py` written (Copernicus GLO-30 bathtub, ocean-connectivity enforced, tested on synthetic DEM) — **runs in CI; slr_miami.json does not exist until the weekly pipeline (or a manual dispatch) runs.** `cityCloseUp()` + OSM Buildings toggle live in GlobeRenderer (`camera:closeup_requested` event). Cinematic pass: HDR enabled (guarded), procedural cloud shell primitive (allowPicking:false; kill switch `USE_CLOUD_SHELL`).
+15. **Per-event upgrades, priority order:** sea level rise (coastline inundation delta — flagship) → heatwave (near-free: `heat_days_gt35c` already baked) → hurricane (historical-analog tracks + surge) → drought (admin-1 choropleth; `drought_index` bake fixed 2026-07-05: 0.6 × precip deficit + 0.4 × evaporative-demand term, re-baked + validated) → wildfire (land mask + smoke drift) → conflict (named-place displacement arcs, analog framing required).
+    *Progress 2026-07-11:* **sea level rise flagship DONE in code** — `InundationGeodata.js` loader + `_renderInundationDelta()` (real delta-band polygons, baked `area_km2` in the label, level shown ≥ projection and labeled honestly, city close-up at +7 s, generic ellipse fallback for non-flagship coasts and until the CI bake lands). **Heatwave label DONE** — reads `temperature_anomaly_c` + `heat_days_gt35c` via ImpactStats; the fabricated `mag × 2.5 °C` label is gone (polygon-bound ellipse swap still open).
+16. **Extend the same pattern to `schema`-tier (19) and `noted`-tier (10) events** as each gets built — polygon-anchored geometry + ImpactStats + city callouts is the template, not a per-event one-off.
 
 **Known bugs (open)**
 
-9. **CSP `frame-src 'none'`** in `public/_headers` may blank the ExportService modal (sandboxed `srcdoc` iframe) in production. Verify on Netlify; fall back to `frame-src 'self'` or a Blob-URL tab if blank.
-10. **`session_end` telemetry is lost on unload** — async Supabase insert inside `beforeunload`; switch to `navigator.sendBeacon` or `fetch(..., { keepalive: true })`.
-11. **`simulation:complete` is never emitted** — simulations run until evicted/ejected. Either implement a natural end or remove the event from the taxonomy.
-12. **ActiveSimulation duplicates a centroid table** — should import from `RegionCentroids.js` (single-source rule).
 13. **Sparse data disclosure in UI** — layers grey-fill sparse-tier countries but there's no user-facing notice. Current bake is all-"high" tier, so low priority.
+
+**Fixed / closed 2026-07-04 → 2026-07-05**
+
+- Bugs #9–#12 were already implemented in code (verified 2026-07-04: clean build + `npm run verify` pass): CSP relaxed to `frame-src 'self' blob: about:` (+ "Open in tab" fallback); `session_end` uses keepalive delivery; `simulation:complete` taxonomy resolved; ActiveSimulation imports centroids from `RegionCentroids.js`.
+- `ssp:changed` now emitted by `TimeController.setSSP()` (2026-07-04) — TelemetryService subscribed to it but it was never fired; SSP switches were missing from session stories.
+- Edge function `parse-scenario` deployed with fresh `ANTHROPIC_API_KEY`; live test 200 + valid SimulationCommand (2026-07-05).
+- `ALLOWED_ORIGIN` locked to the production Netlify URL (2026-07-05).
+- Netlify production deploy live at `https://chipper-faun-a051b1.netlify.app` (full `dist/` from `npm run build`; first attempt was index.html-only, fixed). Bundle/data/CSP headers verified via HTTP probe. Export-modal + live-chat manual checks still pending.
+- `telemetry_events` table created + RLS verified anon INSERT-only (2026-07-05) — see launch-blocker #3.
 
 **Fixed in the 2026-07-03 audit**
 
@@ -341,6 +363,49 @@ Updated 2026-07-03 after a full code audit.
 - **Earthquake and volcanic eruption are in-scope** with climate connection framing
   (glacial isostatic rebound, deglaciation-driven volcanic activity).
 - **Non-climate events (solar_storm)** get an honest scope disclosure + mechanism explanation.
+
+---
+
+## Assistant Handoff — Read This First
+
+This project was architected with a stronger model; you are expected to follow
+its decisions, not re-derive them. Three companion resources exist:
+
+- **`DECISIONS.md`** — locked decisions WITH rationale. Read before proposing
+  any architectural change.
+- **Skills in `.claude/skills/`** — `audit-checklist` (run before releases /
+  after multi-file changes), `add-event-type` (the multi-file sync procedure),
+  `implement-render` (memory contract + visual template). Use them; they
+  encode bugs that already happened once.
+- **`npm run verify`** (in `v2-starter/`) — automated invariant checks.
+  Run it before reporting ANY multi-file task as complete. If it fails, the
+  task is not done.
+
+### Predictable failure modes — check yourself against these
+
+Each of these has happened (or nearly happened) in this codebase:
+
+1. **Editing `EVENT_TYPES` or the system prompt without the other two steps.**
+   EVENT_TYPES, `SCENARIO_PARSER_SYSTEM_PROMPT`, and `ActiveSimulation._dispatch`
+   must stay in sync, and the edge function must be re-synced AND redeployed
+   (`npm run sync-prompt && npx supabase functions deploy parse-scenario`).
+   The prompt once drifted 12 events behind.
+2. **Inlining what already has a single source.** ISO codes → `normalizeISO()`.
+   Country centroids → `RegionCentroids.js`. Year/SSP → `time:changed` events.
+   If you're writing a lookup table, stop and grep for the existing one.
+3. **Creating Cesium objects without tracking them.** Everything goes through
+   `_track()` / `this._owned`, and `destroy()` must remove it. An untracked
+   entity is a leak that survives ejection.
+4. **Letting the LLM's numbers reach the screen.** Parser output positions and
+   sizes visuals; displayed statistics come from baked data only. See
+   DECISIONS.md for why this is the project's most important rule.
+5. **`innerHTML` with unescaped interpolation.** Use `textContent`, or the
+   `escapeHtml()` helper for every interpolated value. This was a real XSS.
+6. **Declaring work done without running anything.** `npm run verify`, then the
+   manual checks in the `audit-checklist` skill for anything it doesn't cover.
+7. **"Improving" locked decisions** (60fps, more SSPs, photorealism, chat
+   persistence, direct API calls "just for dev"). Raise with the user; never
+   silently deviate.
 
 ---
 

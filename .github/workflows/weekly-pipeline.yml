@@ -37,6 +37,8 @@ on:
           - climate
           - worldbank
           - boundaries
+          - cities
+          - geodata
           - validate
 
 jobs:

@@ -67,5 +67,6 @@ export const EventBus = {
  * simulation:complete  { commandId: string }
  * chat:query           { text: string, sessionId: string }
  * session:start        { sessionId: string }
+ * consent:changed      { granted: boolean }  — ConsentState → TelemetryService
  * report:export_requested  { type: string, report: object, context?: object }  → ExportService
  */

@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Privacy Policy — Earth Simulator</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #050d14;
+      color: #d0e8f5;
+      font-family: 'Inter', system-ui, sans-serif;
+      line-height: 1.65;
+      padding: 48px 24px 80px;
+    }
+    main { max-width: 720px; margin: 0 auto; }
+    h1 { font-size: 26px; letter-spacing: -0.01em; margin-bottom: 4px; }
+    .updated { font-size: 12px; color: rgba(208,232,245,0.5); margin-bottom: 32px; }
+    h2 { font-size: 17px; color: #4aa8e8; margin: 32px 0 10px; }
+    p, li { font-size: 14px; color: rgba(208,232,245,0.85); margin-bottom: 10px; }
+    ul { padding-left: 22px; margin-bottom: 12px; }
+    li { margin-bottom: 6px; }
+    a { color: #4aa8e8; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .back { display: inline-block; margin-bottom: 24px; font-size: 13px; }
+    strong { color: #d0e8f5; }
+  </style>
+</head>
+<body>
+  <main>
+    <a class="back" href="/">&larr; Back to Earth Simulator</a>
+    <h1>Privacy Policy</h1>
+    <div class="updated">Last updated: July 5, 2026</div>
+
+    <p>
+      Earth Simulator is a climate exploration tool. This page explains exactly what
+      information the app collects, where it goes, and what never leaves your browser.
+      We have tried to write it in plain language.
+    </p>
+
+    <h2>What we collect — only with your consent</h2>
+    <p>
+      When you first visit, a banner asks whether we may record your session. If you
+      accept, we collect an anonymous "session story" — a timeline of what you explored
+      during this visit:
+    </p>
+    <ul>
+      <li><strong>The full text of your chat messages.</strong> Questions you type may
+        include personal context (for example, where you live or what worries you) —
+        anything you type is stored as-is.</li>
+      <li>Which countries you clicked, which map layers, years, and climate pathways
+        you viewed, and which simulations you ran.</li>
+      <li>Session metadata: a randomly generated session ID, timestamps, your browser
+        viewport size, and the page that referred you here.</li>
+    </ul>
+    <p>
+      This is stored in a database hosted by <strong>Supabase</strong> and is used for
+      one purpose: understanding what people are curious about so we can improve the
+      simulator. It is not used for advertising and is not sold or shared.
+    </p>
+
+    <h2>If you decline</h2>
+    <p>
+      The app works exactly the same. Nothing is recorded for your session, and the
+      banner will ask again on your next visit. Declining is stored only in your
+      browser's memory for the current session.
+    </p>
+
+    <h2>What we do NOT collect</h2>
+    <ul>
+      <li>No account, name, email address, or phone number — there is nothing to sign up for.</li>
+      <li>No precise location. We never request your device's location.</li>
+      <li>No advertising trackers, no analytics cookies, no fingerprinting.</li>
+      <li>No cross-session profile: each visit gets a new random session ID, and session
+        IDs are not linked to each other or to you.</li>
+    </ul>
+
+    <h2>What stays on your device</h2>
+    <p>
+      Chat history is never saved between visits — every reload starts a fresh
+      conversation. The only thing the app stores in your browser is a single flag
+      recording that you accepted the telemetry banner (so we don't ask again).
+      If you decline, not even that is stored.
+    </p>
+
+    <h2>Third-party processing of chat messages</h2>
+    <p>
+      To understand your questions, the text you type into the chat is sent through our
+      server-side proxy to <strong>Anthropic</strong> (the maker of the Claude language
+      model), which processes it to generate the simulator's response. This happens
+      regardless of your telemetry choice — it is how the chat works — but Anthropic
+      receives only the message text and scenario context (year, climate pathway),
+      never a stored profile of you. See
+      <a href="https://www.anthropic.com/legal/privacy" rel="noopener" target="_blank">Anthropic's privacy policy</a>.
+    </p>
+
+    <h2>Hosting and infrastructure</h2>
+    <ul>
+      <li><strong>Netlify</strong> serves the app and, like any web host, processes your
+        IP address in standard server logs.</li>
+      <li><strong>Supabase</strong> hosts the telemetry database and the chat proxy. Our
+        proxy uses your IP address transiently, in memory only, for rate limiting; it is
+        not written to the telemetry database.</li>
+      <li><strong>Cesium ion and NASA GIBS</strong> serve globe imagery and terrain tiles
+        directly to your browser; those requests expose your IP address to them like any
+        map-tile service.</li>
+    </ul>
+
+    <h2>Retention and deletion</h2>
+    <p>
+      Session stories are kept while we actively develop the simulator and are reviewed
+      only by the operator. Because sessions are anonymous, we cannot identify which
+      rows are yours after the fact; if you want a specific session removed, contact us
+      with the approximate date and time of your visit and we will delete matching data.
+    </p>
+
+    <h2>Children</h2>
+    <p>
+      Earth Simulator is an educational tool suitable for general audiences. We do not
+      knowingly collect personal information from anyone, including children; do not type
+      personal details into the chat.
+    </p>
+
+    <h2>Changes</h2>
+    <p>
+      If this policy changes materially, the consent banner will reappear and ask again
+      before any new collection begins.
+    </p>
+
+    <h2>Contact</h2>
+    <p>
+      Questions or deletion requests: contact the operator via the project repository or
+      the contact address published on the site footer.
+    </p>
+  </main>
+</body>
+</html>
