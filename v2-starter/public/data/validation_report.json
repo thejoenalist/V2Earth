@@ -1,5 +1,5 @@
 {
-  "validated_at": "2026-07-05T14:57:45.757722+00:00",
+  "validated_at": "2026-07-12T07:10:48.985429+00:00",
   "passed": true,
   "results": {
     "climate": "PASS",
@@ -12,6 +12,6 @@
   "warning_count": 1,
   "errors": [],
   "warnings": [
-    "manifest.json: data is 22 days old (baked 2026-06-13T14:23:03Z) \u2014 weekly pipeline may have failed"
+    "manifest.json: data is 28 days old (baked 2026-06-13T14:23:03Z) \u2014 weekly pipeline may have failed"
   ]
 }
