@@ -157,7 +157,21 @@ def read_dem_mosaic(tile_paths: list[Path], bbox: tuple) -> tuple[np.ndarray, ob
             data = ds.read(1, window=win, boundless=False)
             r0 = int(round((lat_max - inter[3]) / abs(transform.e)))
             c0 = int(round((inter[0] - lon_min) / res))
-            mosaic[r0:r0 + data.shape[0], c0:c0 + data.shape[1]] = data
+            # from_bounds yields fractional windows; ds.read rounds the shape
+            # independently of r0/c0, so adjacent tiles can come back a pixel
+            # larger than the destination slot (first hit: NYC's E-W tile pair,
+            # (1800,1261) into (1800,1260)). Clip both sides to the overlap —
+            # at worst one 30 m edge pixel at a tile seam, well inside the
+            # DEM's stated block-level accuracy.
+            dr0 = max(0, -r0)
+            dc0 = max(0, -c0)
+            r0 = max(r0, 0)
+            c0 = max(c0, 0)
+            r1 = min(r0 + data.shape[0] - dr0, height)
+            c1 = min(c0 + data.shape[1] - dc0, width)
+            if r1 <= r0 or c1 <= c0:
+                continue
+            mosaic[r0:r1, c0:c1] = data[dr0:dr0 + (r1 - r0), dc0:dc0 + (c1 - c0)]
         return mosaic, transform
     finally:
         for ds in datasets:
