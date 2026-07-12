@@ -75,9 +75,41 @@ METROS = {
             "Copernicus_DSM_COG_10_N26_00_W081_00_DEM",
         ],
     },
+    "nyc": {
+        "display": "New York City",
+        "bbox": (-74.30, 40.45, -73.65, 40.95),
+        "center": {"lon": -74.00, "lat": 40.71},
+        "tiles": [
+            "Copernicus_DSM_COG_10_N40_00_W075_00_DEM",
+            "Copernicus_DSM_COG_10_N40_00_W074_00_DEM",
+        ],
+    },
+    "new_orleans": {
+        "display": "New Orleans",
+        # Includes Lakeview/Gentilly north of 30°N (the Katrina flood bowl) —
+        # hence the four-tile spread.
+        "bbox": (-90.30, 29.80, -89.75, 30.10),
+        "center": {"lon": -90.07, "lat": 29.95},
+        "tiles": [
+            "Copernicus_DSM_COG_10_N29_00_W091_00_DEM",
+            "Copernicus_DSM_COG_10_N29_00_W090_00_DEM",
+            "Copernicus_DSM_COG_10_N30_00_W091_00_DEM",
+            "Copernicus_DSM_COG_10_N30_00_W090_00_DEM",
+        ],
+    },
+    "jakarta": {
+        "display": "Jakarta",
+        # lon_max kept below 107°E so the bake stays inside the E106 tiles;
+        # the flood-critical north coast (Pluit, Tanjung Priok) is included.
+        "bbox": (106.65, -6.35, 106.99, -5.95),
+        "center": {"lon": 106.83, "lat": -6.17},
+        "tiles": [
+            "Copernicus_DSM_COG_10_S07_00_E106_00_DEM",
+            "Copernicus_DSM_COG_10_S06_00_E106_00_DEM",
+        ],
+    },
     # Next in priority order (add tiles when enabling):
-    # "new_orleans", "nyc", "norfolk", "houston_galveston",
-    # "jakarta", "dhaka", "lagos", "shanghai", "rotterdam"
+    # "norfolk", "houston_galveston", "dhaka", "lagos", "shanghai", "rotterdam"
 }
 
 CAVEATS = [

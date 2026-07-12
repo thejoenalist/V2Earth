@@ -13,6 +13,7 @@ import { EVENT_TYPES } from '../chat/SimulationCommand.js';
 import { EventBus } from '../core/EventBus.js';
 import { getCentroid } from '../globe/RegionCentroids.js';
 import { getImpactStats, fmtCount } from '../data/ImpactStats.js';
+import { getCountryFeature, featureToPolygonRings } from '../data/CountryGeometry.js';
 import { findFlagshipMetro, loadInundation, pickLevel } from './InundationGeodata.js';
 import * as Cesium from 'cesium';
 
@@ -791,7 +792,9 @@ export class ActiveSimulation {
           uniform sampler2D colorTexture;
           uniform float intensity;
           in vec2 v_textureCoordinates;
-          out vec4 out_FragColor;
+          // NOTE: do NOT declare out_FragColor — Cesium injects the
+          // declaration into post-process shaders; declaring it again is a
+          // GLSL redefinition error that kills the whole renderer.
 
           void main() {
             float t = mod(czm_frameNumber * 0.025, 6.28318);
@@ -818,20 +821,50 @@ export class ActiveSimulation {
     );
     this._track(shimmer);
 
-    // Ground heat overlay
-    this._track(this.viewer.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(lon, lat),
-      ellipse: {
-        semiMajorAxis: radius,
-        semiMinorAxis: radius * 0.75,
-        height: 100,
-        material: new Cesium.ColorMaterialProperty(
-          new Cesium.CallbackProperty(() =>
-            Cesium.Color.fromCssColorString('#ef4444')
-              .withAlpha(0.07 + Math.sin(this._elapsed() * 2) * 0.035),
-            false)),
-      },
-    }));
+    // Ground heat tint — bound to the real country polygon when the command
+    // targets a country (VISUAL_UPGRADE_PLAN: polygon-anchored geometry, not
+    // centroid ellipses). Falls back to the legacy ellipse for null/unknown
+    // targets (e.g. sub-national or ocean-region heatwaves).
+    const pulsingHeat = new Cesium.ColorMaterialProperty(
+      new Cesium.CallbackProperty(() =>
+        Cesium.Color.fromCssColorString('#ef4444')
+          .withAlpha(0.07 + Math.sin(this._elapsed() * 2) * 0.035),
+        false));
+
+    let polygonBound = false;
+    try {
+      const feature = await getCountryFeature(this.command.target);
+      if (this._destroyed) return;
+      for (const { outer, holes } of featureToPolygonRings(feature)) {
+        this._track(this.viewer.entities.add({
+          polygon: {
+            hierarchy: new Cesium.PolygonHierarchy(
+              Cesium.Cartesian3.fromDegreesArray(outer),
+              holes.map((h) => new Cesium.PolygonHierarchy(
+                Cesium.Cartesian3.fromDegreesArray(h)))),
+            height: 100,
+            arcType: Cesium.ArcType.GEODESIC,
+            // Coarse granularity — same geometry-worker guard as the
+            // choropleth layers (complex coastlines crash finer settings).
+            granularity: Cesium.Math.toRadians(2),
+            material: pulsingHeat,
+          },
+        }));
+        polygonBound = true;
+      }
+    } catch (_) { /* fall through to the ellipse */ }
+
+    if (!polygonBound) {
+      this._track(this.viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(lon, lat),
+        ellipse: {
+          semiMajorAxis: radius,
+          semiMinorAxis: radius * 0.75,
+          height: 100,
+          material: pulsingHeat,
+        },
+      }));
+    }
 
     // Pulsing temperature rings
     for (let i = 0; i < 3; i++) {

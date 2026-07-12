@@ -406,6 +406,13 @@ Each of these has happened (or nearly happened) in this codebase:
 7. **"Improving" locked decisions** (60fps, more SSPs, photorealism, chat
    persistence, direct API calls "just for dev"). Raise with the user; never
    silently deviate.
+8. **Testing prompt changes against a stale dev server.** The local parse proxy
+   (devParseScenarioPlugin.mjs) imports SCENARIO_PARSER_SYSTEM_PROMPT ONCE at
+   dev-server startup — prompt edits need a dev-server restart to take effect.
+   And when a restart lands on a new port (5174, 5175…) because the old server
+   is still running, the OLD app keeps serving on the old port: confirm which
+   port you're testing before concluding a change "didn't work". This burned
+   two test cycles on 2026-07-12.
 
 ---
 

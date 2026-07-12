@@ -19,10 +19,12 @@
  * this metro's geometry.
  */
 const FLAGSHIP_METROS = [
-  { key: 'miami', display: 'Miami', lon: -80.19, lat: 25.78, matchRadiusDeg: 2.0 },
+  { key: 'miami',       display: 'Miami',         lon: -80.19, lat: 25.78, matchRadiusDeg: 2.0 },
+  { key: 'nyc',         display: 'New York City', lon: -74.00, lat: 40.71, matchRadiusDeg: 2.0 },
+  { key: 'new_orleans', display: 'New Orleans',   lon: -90.07, lat: 29.95, matchRadiusDeg: 2.0 },
+  { key: 'jakarta',     display: 'Jakarta',       lon: 106.83, lat: -6.17, matchRadiusDeg: 2.0 },
   // Enable as bake_geodata.py METROS grows:
-  // new_orleans, nyc, norfolk, houston_galveston, jakarta, dhaka, lagos,
-  // shanghai, rotterdam
+  // norfolk, houston_galveston, dhaka, lagos, shanghai, rotterdam
 ];
 
 /** @type {Map<string, Promise<Object|null>>} */
