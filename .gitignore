@@ -16,3 +16,4 @@ v2-starter/pipeline/.dem_cache/
 # Supabase local dev
 .supabase/
 supabase/.temp/
+**/supabase/.temp/
