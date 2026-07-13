@@ -25,6 +25,13 @@
     "full_name": "GeoNames geographical database (city names, coordinates, population)",
     "license": "CC BY 4.0",
     "url": "https://www.geonames.org",
-    "note": "cities.json currently holds approximate published figures pending a full GeoNames bake via pipeline/fetch_cities.py"
+    "note": "cities.json is built from GeoNames when reachable, otherwise from Natural Earth populated places (public domain); see fetch_cities.py"
+  },
+  "CopernicusDEM": {
+    "full_name": "Copernicus Global 30m Digital Elevation Model (GLO-30)",
+    "license": "Free and open access under the Copernicus DEM licence",
+    "attribution": "Produced using Copernicus WorldDEM-30 \u00a9 DLR e.V. 2010-2014 and \u00a9 Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved.",
+    "url": "https://registry.opendata.aws/copernicus-dem/",
+    "note": "Source DEM for coastal inundation polygons (bake_geodata.py)"
   }
 }
