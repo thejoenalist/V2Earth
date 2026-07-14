@@ -1,13 +1,16 @@
-﻿{
-  "validated_at": "2026-07-14T17:02:03.177531+00:00",
+{
+  "validated_at": "2026-07-14T23:55:16.428142+00:00",
   "passed": true,
   "results": {
+    "climate": "PASS",
+    "worldbank": "PASS",
+    "attribution": "PASS",
+    "geojson": "PASS",
+    "manifest": "PASS",
     "geodata": "PASS"
   },
   "error_count": 0,
-  "warning_count": 1,
+  "warning_count": 0,
   "errors": [],
-  "warnings": [
-    "geodata/hurricane_new_orleans.json: seed:true — hand-seeded placeholder; bake_tracks.py overwrites it with real IBTrACS best-track in CI"
-  ]
+  "warnings": []
 }
