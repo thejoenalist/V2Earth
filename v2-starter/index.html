@@ -236,7 +236,11 @@
     }
 
     #chat-messages {
-      max-height: 240px;
+      /* Bottom-anchored, so this grows upward. Raised from 240px so a full
+         impact card (headline + rows + human-scale line + nearest cities +
+         caveats) reads without the top scrolling out of view; capped at 60vh
+         so it never runs off the top of the window. */
+      max-height: min(60vh, 480px);
       overflow-y: auto;
       display: flex;
       flex-direction: column;

@@ -216,9 +216,14 @@ export class GlobeRenderer {
     // with ESRI + Blue Marble if this layer is unavailable.
     try {
       this._nightLayer = this.viewer.imageryLayers.addImageryProvider(createBlackMarbleProvider());
+      // Toned down 2026-07-13: brightness 3.0/contrast 2.0 made the night side a
+      // harsh, dominating layer. Now a soft glow (neutral contrast), with the
+      // effective opacity further capped in _applyImageryDetailForCamera via
+      // NIGHT_LAYER_MAX_ALPHA so city lights hint at the surface without
+      // overpowering the daytime imagery.
       this._nightLayer.alpha                  = 1.0;
-      this._nightLayer.brightness             = 3.0;
-      this._nightLayer.contrast               = 2.0;
+      this._nightLayer.brightness             = 1.6;
+      this._nightLayer.contrast               = 1.0;
       this._nightLayer.colorToAlpha           = new Cesium.Color(0, 0, 0, 1);
       this._nightLayer.colorToAlphaThreshold  = 0.1;
     } catch (e) {
@@ -466,6 +471,25 @@ export class GlobeRenderer {
   // ── Chapter aesthetic ──────────────────────────────────────────────────────
 
   /**
+   * Fly the camera to a country's centroid for a country-scale view.
+   * Used by region_inspect, timeline_jump, and scenario_compare. Unknown ISO
+   * (no baked centroid) is a safe no-op, so callers can use `flyToISO?.(iso)`.
+   *
+   * @param {string} iso - alpha-3 country code
+   */
+  flyToISO(iso) {
+    const c = getCentroid(iso);
+    if (!c) return;
+    this.viewer.camera.flyTo({
+      // Slight south offset + ~6,000 km altitude frames the country with a
+      // gentle tilt, matching the framing ActiveSimulation uses for events.
+      destination: Cesium.Cartesian3.fromDegrees(c.lon, c.lat - 3, 6_000_000),
+      duration: 2.0,
+      easingFunction: Cesium.EasingFunction.QUADRATIC_IN_OUT,
+    });
+  }
+
+  /**
    * Desaturate + dim imagery as year advances toward 2100.
    * Full color at 2025, near-monochrome at 2100.
    * Dims night lights proportionally — a dark future shouldn't glow.
@@ -483,10 +507,12 @@ export class GlobeRenderer {
       layer.brightness  = brightness;
     }
 
-    // Night lights fade as the world becomes a darker future
+    // Night lights fade as the world becomes a darker future.
+    // Base brightness kept subtle (1.6, matching init) so the layer never
+    // dominates; it dims further toward 2100.
     if (this._nightLayer) {
       this._chapterNightAlpha = 1.0 - t * 0.6;
-      this._nightLayer.brightness = 3.0  - t * 1.5;
+      this._nightLayer.brightness = 1.6 - t * 0.9;
       this._applyImageryDetailForCamera();
     }
 
@@ -516,6 +542,11 @@ export class GlobeRenderer {
   _applyImageryDetailForCamera() {
     if (!this.viewer) return;
 
+    // Hard ceiling on night-lights opacity. The Black Marble layer is decorative
+    // and was overpowering the imagery; capping the effective alpha here keeps it
+    // a subtle glow at every zoom. Tune this single knob to taste (0 = off).
+    const NIGHT_LAYER_MAX_ALPHA = 0.4;
+
     const height = this.viewer.camera.positionCartographic.height;
     // 1 = global view, 0 = close zoom (~100 km floor)
     const farBlend = Cesium.Math.clamp((height - 8e5) / (1.2e7 - 8e5), 0, 1);
@@ -526,7 +557,7 @@ export class GlobeRenderer {
     }
 
     if (this._nightLayer) {
-      this._nightLayer.alpha = farBlend * this._chapterNightAlpha;
+      this._nightLayer.alpha = farBlend * this._chapterNightAlpha * NIGHT_LAYER_MAX_ALPHA;
       this._nightLayer.show = farBlend > 0.02;
     }
 

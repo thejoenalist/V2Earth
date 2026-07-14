@@ -232,7 +232,12 @@ export async function getImpactStats({ eventType, iso, year, ssp, center = null 
           basis: `vs 1995–2014 baseline, ${year}`, source: climateSource(ssp) };
       }
       if (climate?.precipitation_change_pct != null) push('Precipitation change',
-        fmtSigned(climate.precipitation_change_pct, 1, ' %'), 'annual — drier fuels', climateSource(ssp));
+        fmtSigned(climate.precipitation_change_pct, 1, ' %'),
+        // "drier fuels" only when precip actually falls — a positive change is
+        // wetter, so claiming drier fuels there contradicts the number (caught on
+        // the Australia eyeball: +7.7% labeled "drier fuels").
+        climate.precipitation_change_pct < 0 ? 'annual — drier fuels' : 'annual',
+        climateSource(ssp));
       break;
     }
     case 'conflict': {

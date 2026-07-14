@@ -50,6 +50,29 @@ export function findFlagshipMetro(lon, lat) {
 }
 
 /**
+ * Fallback matcher for when the parser's event center lands off the coast.
+ * The scenario parser (an LLM) often returns a center that's degrees away from
+ * the metro the user named — e.g. a "Miami sea level" query whose center drifts
+ * into the Gulf, missing Miami's 2° radius and falling back to the generic
+ * ellipse. The nearest baked cities are far more reliable: Fort Lauderdale /
+ * Hialeah sit right on the real metro, so testing each nearby city against the
+ * flagship registry recovers the intended metro. Returns the first city that
+ * matches a flagship metro (cities are distance-sorted), else null.
+ *
+ * @param {Array<{lon:number, lat:number}>} [cities] - nearestCities from ImpactStats
+ * @returns {{key:string, display:string, lon:number, lat:number}|null}
+ */
+export function findFlagshipMetroForCities(cities) {
+  if (!Array.isArray(cities)) return null;
+  for (const c of cities) {
+    if (c?.lon == null || c?.lat == null) continue;
+    const m = findFlagshipMetro(c.lon, c.lat);
+    if (m) return m;
+  }
+  return null;
+}
+
+/**
  * Load a metro's baked inundation document (cached; null on any failure).
  *
  * @param {string} metroKey

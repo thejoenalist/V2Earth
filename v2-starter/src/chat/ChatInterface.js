@@ -15,8 +15,9 @@
 
 import { EventBus } from '../core/EventBus.js';
 import { ScenarioParser } from './ScenarioParser.js';
-import { getImpactStats } from '../data/ImpactStats.js';
+import { getImpactStats, loadImpactData, fmtNum, fmtSigned } from '../data/ImpactStats.js';
 import { seaLevelHumanLine } from '../data/HumanScale.js';
+import { SIMULATION_DECISION_GRACE_MS } from '../simulation/ActiveSimulation.js';
 
 /** Escape user-supplied strings before injection into innerHTML. */
 function escapeHtml(str) {
@@ -47,6 +48,9 @@ export class ChatInterface {
     /** Active quiz state */
     this._activeQuiz     = null;   // { questions, answers: {} }
 
+    /** Pending keep-or-clear decisions, keyed by commandId → { timer, interval } */
+    this._pendingDecisions = new Map();
+
     // Bound EventBus handlers — stored so destroy() can remove them
     this._onStackChanged = ({ stack }) => {
       if (this._ejectBtn) {
@@ -55,8 +59,13 @@ export class ChatInterface {
     };
     this._onEjected = () => {
       if (this._ejectBtn) this._ejectBtn.style.display = 'none';
+      // A full clear supersedes any outstanding keep-or-clear prompts.
+      for (const commandId of [...this._pendingDecisions.keys()]) {
+        this._resolveDecision(commandId, 'The scenario was cleared.');
+      }
     };
     this._onCompound = ({ compound }) => this._renderCompoundAlert(compound);
+    this._onDecisionRequested = (payload) => this._renderKeepClearPrompt(payload);
 
     this._wire();
   }
@@ -79,12 +88,18 @@ export class ChatInterface {
     EventBus.on('simulation:stack_changed',    this._onStackChanged);
     EventBus.on('simulation:ejected',          this._onEjected);
     EventBus.on('simulation:compound_detected', this._onCompound);
+    EventBus.on('simulation:decision_requested', this._onDecisionRequested);
   }
 
   destroy() {
     EventBus.off('simulation:stack_changed',    this._onStackChanged);
     EventBus.off('simulation:ejected',          this._onEjected);
     EventBus.off('simulation:compound_detected', this._onCompound);
+    EventBus.off('simulation:decision_requested', this._onDecisionRequested);
+    // Cancel any outstanding grace timers so nothing fires after teardown.
+    for (const commandId of [...this._pendingDecisions.keys()]) {
+      this._resolveDecision(commandId);
+    }
   }
 
   // ── Submit ────────────────────────────────────────────────────────────────
@@ -158,6 +173,9 @@ export class ChatInterface {
     if (narrative.local)    { this._renderLocalAction(narrative);            return; }
     if (narrative.plan)     { this._renderResiliencePlan(narrative, command); return; }
     if (narrative.research) { this._renderResearchQuery(narrative);          return; }
+
+    // Baked SSP2-vs-SSP5 delta card (rule #4 — numbers from climate.json only).
+    if (type === 'scenario_compare') this._renderScenarioCompare(command);
 
     // Real baked statistics for hazard events (VISUAL_UPGRADE_PLAN F2) — numbers
     // come from climate.json/worldbank.json/cities.json, never the LLM narrative.
@@ -350,6 +368,68 @@ export class ChatInterface {
     };
   }
 
+  // ── Render: scenario_compare (baked SSP2-4.5 vs SSP5-8.5) ─────────────────
+
+  /**
+   * Side-by-side SSP delta card. Every number comes from baked climate.json
+   * (rule #4) — the LLM narrative never supplies these. Async: appends when the
+   * baked data resolves. Global (target null) shows an equal-weighted country
+   * mean, labelled as such.
+   * @param {import('./SimulationCommand.js').SimulationCommand} command
+   */
+  async _renderScenarioCompare(command) {
+    const iso  = command.target ?? null;
+    const year = this._timeController.snapToNearest(
+      command.params?.year ?? this._timeController.year);
+
+    let climate, worldbank;
+    try { ({ climate, worldbank } = await loadImpactData()); } catch { return; }
+    if (!climate) return;
+
+    const lo = this._climateRow(climate, iso, year, 'SSP2-4.5');
+    const hi = this._climateRow(climate, iso, year, 'SSP5-8.5');
+    if (!lo || !hi) return;
+
+    const rows = [
+      { key: 'temperature_anomaly_c',    label: 'Temperature anomaly', unit: '°C', digits: 1 },
+      { key: 'sea_level_rise_m',         label: 'Sea level rise',      unit: ' m', digits: 2 },
+      { key: 'heat_days_gt35c',          label: 'Days >35 °C/yr',      unit: '',   digits: 0 },
+      { key: 'precipitation_change_pct', label: 'Precipitation',       unit: '%',  digits: 1 },
+    ];
+    const lines = rows
+      .filter((r) => lo[r.key] != null && hi[r.key] != null)
+      .map((r) => `• ${r.label}: ${fmtNum(lo[r.key], r.digits, r.unit)} → `
+        + `${fmtNum(hi[r.key], r.digits, r.unit)} (Δ ${fmtSigned(hi[r.key] - lo[r.key], r.digits, r.unit)})`);
+    if (!lines.length) return;
+
+    const where = iso ? (worldbank?.[iso]?.name ?? iso) : 'Global (country average)';
+    this._addMessage('assistant',
+      `📊 SSP2-4.5 vs SSP5-8.5 — ${where}, ${year}\n${lines.join('\n')}`);
+  }
+
+  /**
+   * One climate row for the compare card. For a country, the baked row; for
+   * global (iso null), an equal-weighted mean across every country carrying the
+   * chapter/SSP (unweighted, hence the "country average" label on the card).
+   */
+  _climateRow(climate, iso, year, ssp) {
+    const y = String(year);
+    if (iso) return climate?.[iso]?.[y]?.[ssp] ?? null;
+    const acc = {};
+    let n = 0;
+    for (const code of Object.keys(climate)) {
+      const row = climate[code]?.[y]?.[ssp];
+      if (!row) continue;
+      n++;
+      for (const k of Object.keys(row)) {
+        if (typeof row[k] === 'number') acc[k] = (acc[k] ?? 0) + row[k];
+      }
+    }
+    if (!n) return null;
+    for (const k of Object.keys(acc)) acc[k] /= n;
+    return acc;
+  }
+
   // ── Render: research_query ────────────────────────────────────────────────
 
   _renderResearchQuery({ research, learned, sources }) {
@@ -384,6 +464,96 @@ export class ChatInterface {
     el.style.color = '#ffd080';
     this._messages?.appendChild(el);
     this._messages?.scrollTo({ top: this._messages.scrollHeight, behavior: 'smooth' });
+  }
+
+  // ── Render: keep-or-clear decision (scenario lifetime reached) ─────────────
+
+  /**
+   * A scenario has been on the globe for its full lifetime. Ask the user to keep
+   * it up or clear it, with a live countdown; if they don't answer within the
+   * grace window it auto-clears. "Clear" and the timeout both emit
+   * simulation:complete so EventSimulator performs the real teardown.
+   *
+   * @param {{ commandId: string, eventType: string|null }} payload
+   */
+  _renderKeepClearPrompt({ commandId, eventType } = {}) {
+    if (!commandId || this._pendingDecisions.has(commandId)) return;
+
+    const el = this._createMessageEl('assistant');
+    el.style.background  = 'rgba(74,168,232,0.1)';
+    el.style.borderColor = 'rgba(74,168,232,0.35)';
+    el.style.color       = '#a8d8f0';
+
+    const label = document.createElement('div');
+    label.textContent = '⏳ This scenario has been up for 3 minutes. Keep it on the globe, or clear it?';
+    el.appendChild(label);
+
+    const countdown = document.createElement('div');
+    countdown.style.cssText = 'margin-top:6px; font-size:11px; color:#7ec8e3;';
+    el.appendChild(countdown);
+
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex; gap:8px; margin-top:10px;';
+    const mkBtn = (text) => {
+      const b = document.createElement('button');
+      b.textContent = text;
+      b.style.cssText = `
+        padding:8px 16px; border-radius:8px;
+        border:1px solid rgba(74,168,232,0.5); background:rgba(74,168,232,0.15);
+        color:#7ec8e3; cursor:pointer; font-size:13px;
+      `;
+      return b;
+    };
+    const keepBtn  = mkBtn('Keep it up');
+    const clearBtn = mkBtn('Clear it');
+    row.append(keepBtn, clearBtn);
+    el.appendChild(row);
+
+    const deadline = Date.now() + SIMULATION_DECISION_GRACE_MS;
+    const paintCountdown = () => {
+      const secs = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      countdown.textContent = `Auto-clears in ${secs}s if you don't choose.`;
+    };
+    paintCountdown();
+
+    const interval = setInterval(paintCountdown, 1000);
+    const timer = setTimeout(() => {
+      // Grace window lapsed with no response → clear.
+      EventBus.emit('simulation:complete', { commandId, eventType });
+      this._resolveDecision(commandId, '✕ No response — scenario auto-cleared.');
+    }, SIMULATION_DECISION_GRACE_MS);
+
+    keepBtn.addEventListener('click', () => {
+      // Persist: cancel the grace timer, leave the sim in the stack.
+      this._resolveDecision(commandId, "✓ Keeping it up — it'll stay until you clear it or run another scenario.");
+    });
+    clearBtn.addEventListener('click', () => {
+      EventBus.emit('simulation:complete', { commandId, eventType });
+      this._resolveDecision(commandId, '✕ Scenario cleared.');
+    });
+
+    this._pendingDecisions.set(commandId, { el, row, countdown, timer, interval });
+    this._messages?.appendChild(el);
+    this._messages?.scrollTo({ top: this._messages.scrollHeight, behavior: 'smooth' });
+  }
+
+  /**
+   * Tear down a pending keep-or-clear prompt: stop its timers, remove the
+   * buttons, and (optionally) show a resolution line. Idempotent.
+   *
+   * @param {string} commandId
+   * @param {string} [resolutionText]
+   */
+  _resolveDecision(commandId, resolutionText) {
+    const pending = this._pendingDecisions.get(commandId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    clearInterval(pending.interval);
+    this._pendingDecisions.delete(commandId);
+    pending.row?.remove();
+    if (resolutionText && pending.countdown) {
+      pending.countdown.textContent = resolutionText;
+    }
   }
 
   // ── Render: empowerment quiz offer ────────────────────────────────────────

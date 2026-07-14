@@ -31,6 +31,10 @@ FETCHERS = [
     ("fetch_cmip6.py", "Climate projections SSP2+SSP5 (CMIP6 via CCKP)"),
     ("fetch_cities.py", "City pins + populations (GeoNames / Natural Earth)"),
     ("bake_geodata.py", "Coastal inundation polygons (Copernicus GLO-30 DEM)"),
+    # After bake_geodata.py: bake_tracks' surge reuses its DEM helpers + tile cache.
+    ("bake_tracks.py", "Hurricane analog tracks + surge (IBTrACS + GLO-30)"),
+    ("bake_admin1.py", "Admin-1 boundaries for drought choropleth (Natural Earth 10m, global)"),
+    ("bake_landmask.py", "Burnable land+ice mask for wildfire (Natural Earth 50m)"),
     ("build_attribution.py", "Data source attribution (CC BY 4.0)"),
 ]
 

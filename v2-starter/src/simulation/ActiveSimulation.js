@@ -14,15 +14,26 @@ import { EventBus } from '../core/EventBus.js';
 import { getCentroid } from '../globe/RegionCentroids.js';
 import { getImpactStats, fmtCount } from '../data/ImpactStats.js';
 import { getCountryFeature, featureToPolygonRings } from '../data/CountryGeometry.js';
-import { findFlagshipMetro, loadInundation, pickLevel } from './InundationGeodata.js';
+import { loadAdmin1, regionToPolygonRings } from './Admin1Geodata.js';
+import { loadLandMask } from './LandMaskGeodata.js';
+import { findFlagshipMetro, findFlagshipMetroForCities, loadInundation, pickLevel } from './InundationGeodata.js';
+import { loadHurricane } from './HurricaneGeodata.js';
 import * as Cesium from 'cesium';
 
 /**
- * Natural lifetime of a simulation in milliseconds. After this, the sim
- * emits `simulation:complete` and EventSimulator winds it down — keeps the
- * globe clean and lets requestRenderMode re-idle the GPU.
+ * Natural lifetime of a simulation in milliseconds. After this, the sim emits
+ * `simulation:decision_requested` — ChatInterface asks the user to keep it up or
+ * clear it, with a grace window (below) before it auto-clears. The actual
+ * teardown still happens in EventSimulator via `simulation:complete`, which
+ * ChatInterface emits on the user's choice or when the grace window lapses.
  */
-export const SIMULATION_LIFETIME_MS = 60_000;
+export const SIMULATION_LIFETIME_MS = 180_000; // 3 minutes on the globe
+
+/**
+ * Grace window after the keep-or-clear prompt appears. If the user doesn't
+ * answer within this time, the scenario auto-clears. Owned by ChatInterface.
+ */
+export const SIMULATION_DECISION_GRACE_MS = 60_000; // 1 minute to decide
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Canvas helpers for particle textures
@@ -84,12 +95,12 @@ export class ActiveSimulation {
     const strategy = meta?.render ?? 'placeholder';
     await this._dispatch(strategy);
 
-    // Natural end: after the lifetime elapses, announce completion.
-    // EventSimulator owns the stack, so it (not this class) performs the
-    // actual teardown in response to this event.
+    // Natural end: after the lifetime elapses, ask the user whether to keep the
+    // scenario up or clear it (ChatInterface renders the prompt + runs the grace
+    // countdown, then emits simulation:complete for EventSimulator to tear down).
     this._lifetimeTimer = setTimeout(() => {
       if (this._destroyed) return;
-      EventBus.emit('simulation:complete', {
+      EventBus.emit('simulation:decision_requested', {
         commandId: this.command.id,
         eventType: this.eventType,
       });
@@ -297,6 +308,50 @@ export class ActiveSimulation {
       },
     }));
 
+    // ── Historical-analog track (HURRICANE_TRACKS_PLAN Phase 1) ──
+    // Real past storm's path from a baked IBTrACS-derived file; null → no analog
+    // for this coast (or bake not run) → spiral-only, unchanged. Coordinates and
+    // the per-point category are baked (rule #4), framed honestly as an analog.
+    const trackMetro = findFlagshipMetro(lon, lat);
+    const trackDoc   = trackMetro ? await loadHurricane(trackMetro.key) : null;
+    if (this._destroyed) return;
+    if (trackDoc?.track?.length) this._renderHurricaneTrack(trackDoc);
+    if (trackDoc?.surge?.rings?.length) this._renderHurricaneSurge(trackDoc.surge);
+
+    // ── Baked impact overlay (VISUAL_UPGRADE_PLAN template: ImpactStats + city
+    // callouts). The category above is the scenario the user is exploring; the
+    // numbers here are baked (climate.json/worldbank/cities.json), never the LLM.
+    // getImpactStats gives hurricane a coastal-city bias + surge-baseline SLR.
+    let stats = null;
+    try {
+      stats = await getImpactStats({
+        eventType: 'hurricane', iso: this.command.target,
+        year: this.year, ssp: this.ssp, center: { lon, lat },
+      });
+    } catch (_) { /* overlay is best-effort; the spiral still renders */ }
+    if (this._destroyed) return;
+
+    if (stats?.raw?.seaLevelRiseM != null) {
+      this._track(this.viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(lon, lat + stormR / 111_000 + 0.9),
+        label: {
+          text: `+${stats.raw.seaLevelRiseM.toFixed(2)} m baseline sea level by ${this.year}`
+            + ` (CMIP6 ${this.ssp}) — adds to storm surge`,
+          font: '12px system-ui',
+          fillColor: Cesium.Color.fromCssColorString('#cce8ff'),
+          outlineColor: Cesium.Color.BLACK,
+          outlineWidth: 2,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          verticalOrigin: Cesium.VerticalOrigin.TOP,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          pixelOffset: new Cesium.Cartesian2(0, 6),
+        },
+      }));
+    }
+
+    // Coastal city callouts — the human anchor (same treatment as sea level rise).
+    this._addCityPins(stats?.nearestCities);
+
     // ── Rotation animation ───────────────────────────────────────────────
     let last = performance.now();
     this._addPostRenderListener(() => {
@@ -317,6 +372,203 @@ export class ActiveSimulation {
       duration: 2.5,
       easingFunction: Cesium.EasingFunction.CUBIC_IN_OUT,
     });
+  }
+
+  /**
+   * Draw a baked historical-analog storm track (HURRICANE_TRACKS_PLAN Phase 1):
+   * a glowing polyline through the real path, category-colored dots at each
+   * point, an honest "analog — not a forecast" label at landfall, and a marker
+   * that walks the track over the animation. All entities are _track()ed, so
+   * destroy() removes them with the rest of the simulation.
+   *
+   * @param {Object} doc - hurricane_<metro>.json (track[], landfall, _meta.analog)
+   */
+  _renderHurricaneTrack(doc) {
+    const pts = doc.track;
+    if (!Array.isArray(pts) || pts.length < 2) return;
+
+    const flat = [];
+    for (const p of pts) flat.push(p.lon, p.lat);
+
+    // Path polyline — warm glow along the real geodesic path.
+    this._track(this.viewer.entities.add({
+      polyline: {
+        positions: Cesium.Cartesian3.fromDegreesArray(flat),
+        width: 3,
+        arcType: Cesium.ArcType.GEODESIC,
+        material: new Cesium.PolylineGlowMaterialProperty({
+          glowPower: 0.25,
+          color: Cesium.Color.fromCssColorString('#fb923c').withAlpha(0.9),
+        }),
+      },
+    }));
+
+    // Category dot at each track point (Saffir–Simpson warm ramp).
+    for (const p of pts) {
+      this._track(this.viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(p.lon, p.lat),
+        point: {
+          pixelSize: 6,
+          color: Cesium.Color.fromCssColorString(this._categoryColor(p.category)),
+          outlineColor: Cesium.Color.BLACK,
+          outlineWidth: 1,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      }));
+    }
+
+    // Analog label at landfall — honest framing is mandatory, not polish.
+    const a  = doc._meta?.analog;
+    const lf = doc.landfall ?? pts[pts.length - 1];
+    if (a && lf) {
+      this._track(this.viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(lf.lon, lf.lat),
+        label: {
+          text: `${a.name} (${a.year}) — Cat ${a.peak_category} peak\nhistorical analog — not a forecast`,
+          font: '11px system-ui',
+          fillColor: Cesium.Color.fromCssColorString('#fed7aa'),
+          outlineColor: Cesium.Color.BLACK,
+          outlineWidth: 2,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          verticalOrigin: Cesium.VerticalOrigin.TOP,
+          pixelOffset: new Cesium.Cartesian2(0, 10),
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      }));
+    }
+
+    // Marker that walks the track over ~12 s, then holds at the final point.
+    this._track(this.viewer.entities.add({
+      position: new Cesium.CallbackProperty(() => {
+        const s = Math.min(this._elapsed() / 12, 1) * (pts.length - 1);
+        const i = Math.min(Math.floor(s), pts.length - 2);
+        const f = s - i;
+        return Cesium.Cartesian3.fromDegrees(
+          pts[i].lon + (pts[i + 1].lon - pts[i].lon) * f,
+          pts[i].lat + (pts[i + 1].lat - pts[i].lat) * f,
+        );
+      }, false),
+      point: {
+        pixelSize: 10,
+        color: Cesium.Color.WHITE,
+        outlineColor: Cesium.Color.fromCssColorString('#ef4444'),
+        outlineWidth: 2,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    }));
+    // No postRender listener here: the marker's CallbackProperty is re-evaluated
+    // by the spiral's rotation listener in _renderHurricane, which already forces
+    // a per-frame render for the whole hurricane simulation.
+  }
+
+  /**
+   * Draw the baked storm-surge bathtub footprint (HURRICANE_TRACKS_PLAN Phase 2).
+   * Present only after pipeline/bake_tracks.py runs the DEM step in CI; the
+   * `area_km2` shown is pipeline-computed (rule #4). Teal fill fades in over ~3 s;
+   * distinct from the sea-level-rise blue. All entities _track()ed. Labelled
+   * "category-typical, bathtub" — it is not this storm's observed surge.
+   *
+   * @param {Object} surge - { height_m, area_km2, rings: [[[lon,lat],…],…] }
+   */
+  _renderHurricaneSurge(surge) {
+    const rings = surge.rings.slice(0, 60);
+    const fill = Cesium.Color.fromCssColorString('#0e6b8f');
+    const line = Cesium.Color.fromCssColorString('#38bdf8');
+
+    for (const ring of rings) {
+      const flat = [];
+      for (const [rlon, rlat] of ring) flat.push(rlon, rlat);
+      this._track(this.viewer.entities.add({
+        polygon: {
+          hierarchy: new Cesium.PolygonHierarchy(
+            Cesium.Cartesian3.fromDegreesArray(flat)),
+          material: new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(
+            () => fill.withAlpha(Math.min(this._elapsed() / 3, 1) * 0.5), false)),
+          outline: true,
+          outlineColor: line.withAlpha(0.7),
+          outlineWidth: 1,
+          height: 0,
+        },
+      }));
+    }
+
+    // Extent label — anchored at the first vertex of the first ring.
+    const anchor = rings[0]?.[0];
+    if (anchor && surge.area_km2 != null) {
+      this._track(this.viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(anchor[0], anchor[1]),
+        label: {
+          text: `Storm surge — ~${surge.height_m} m (category-typical, bathtub)`
+            + `\n${surge.area_km2} km² inundated`,
+          font: '11px system-ui',
+          fillColor: Cesium.Color.fromCssColorString('#bae6fd'),
+          outlineColor: Cesium.Color.BLACK,
+          outlineWidth: 2,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          verticalOrigin: Cesium.VerticalOrigin.TOP,
+          pixelOffset: new Cesium.Cartesian2(0, 8),
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      }));
+    }
+  }
+
+  /** Saffir–Simpson category → warm color ramp (0 = pre-hurricane). */
+  _categoryColor(cat) {
+    return ['#fde68a', '#ffeda0', '#feb24c', '#fd8d3c', '#f03b20', '#bd0026'][
+      Math.max(0, Math.min(5, cat | 0))
+    ];
+  }
+
+  /**
+   * Standard multi-line baked-stat label anchored above an event. Shared by the
+   * heatwave/drought/wildfire/conflict renders (identical styling — only text,
+   * anchor, and colour differ). Tracked for destroy().
+   */
+  _addStatLabel(lon, lat, text, color) {
+    this._track(this.viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(lon, lat),
+      label: {
+        text,
+        font: 'bold 14px system-ui',
+        fillColor: Cesium.Color.fromCssColorString(color),
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 2,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    }));
+  }
+
+  /**
+   * Named-city callout pins (name + population) — the human anchor. Shared by
+   * the sea-level-rise and hurricane renders. Tracked for destroy().
+   */
+  _addCityPins(cities) {
+    for (const city of (cities ?? [])) {
+      this._track(this.viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(city.lon, city.lat),
+        point: {
+          pixelSize: 7,
+          color: Cesium.Color.fromCssColorString('#fde68a'),
+          outlineColor: Cesium.Color.fromCssColorString('#78350f'),
+          outlineWidth: 1,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+        label: {
+          text: `${city.name}\n${fmtCount(city.population)} people`,
+          font: '11px system-ui',
+          fillColor: Cesium.Color.fromCssColorString('#fef3c7'),
+          outlineColor: Cesium.Color.BLACK,
+          outlineWidth: 2,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          verticalOrigin: Cesium.VerticalOrigin.TOP,
+          pixelOffset: new Cesium.Cartesian2(0, 8),
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      }));
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -348,7 +600,12 @@ export class ActiveSimulation {
     // ── Flagship metro? Load REAL coastline-inundation geometry (F3) ──
     // Baked by pipeline/bake_geodata.py from the Copernicus GLO-30 DEM.
     // Missing file (bake not run yet) → null → generic render below.
-    const metro = findFlagshipMetro(lon, lat);
+    // Primary match on the parser's center; fall back to the nearest baked
+    // cities when that center drifts offshore (see findFlagshipMetroForCities).
+    // Without the fallback, an imprecise "Miami" center misses the 2° radius and
+    // the user gets the generic ellipse with no visible land-loss delta.
+    const metro = findFlagshipMetro(lon, lat)
+      ?? findFlagshipMetroForCities(stats?.nearestCities);
     const doc   = metro ? await loadInundation(metro.key) : null;
     if (this._destroyed) return;
     const level = doc ? pickLevel(doc, displayRise) : null;
@@ -368,20 +625,29 @@ export class ActiveSimulation {
       extentLine = `\nshowing the ${level.levelKey} m extent — `
         + `${level.areaKm2 != null ? `${level.areaKm2} km² of land newly under water` : 'newly inundated land'}`;
 
-      // Close-up moment (F5): once the flood fill is mostly in, fly to the
-      // lowest-lying named city we know about (South Beach moment). Fired via
-      // the tracked postRender listener so destroy() can never leak a timer.
-      const closeupCity = (stats?.nearestCities ?? [])
-        .filter((c) => c.meanElevM != null)
-        .sort((a, b) => a.meanElevM - b.meanElevM)[0] ?? null;
-      if (closeupCity) {
+      // Close-up moment (F5): once the flood fill is mostly in, fly in for the
+      // South Beach moment. Prefer the lowest-lying named city we have elevation
+      // for; else the nearest named city (nearestCities is distance-sorted);
+      // else the baked metro centre. The fallback matters: most coastal-metro
+      // cities lack per-city elevation (only ~44/1006 carry mean_elev_m, and
+      // Miami itself is null), so without it the flagship close-up would
+      // silently never fire. Fired via the tracked postRender listener so
+      // destroy() can never leak a timer.
+      const closeupTarget =
+        (stats?.nearestCities ?? [])
+          .filter((c) => c.meanElevM != null)
+          .sort((a, b) => a.meanElevM - b.meanElevM)[0]
+        ?? (stats?.nearestCities ?? [])[0]
+        ?? { lon: doc.center?.lon ?? lon, lat: doc.center?.lat ?? lat,
+             name: doc._meta?.display ?? 'the coast' };
+      {
         let fired = false;
         this._addPostRenderListener(() => {
           if (fired || this._destroyed || this._elapsed() < 7) return;
           fired = true;
           EventBus.emit('camera:closeup_requested', {
-            lon: closeupCity.lon, lat: closeupCity.lat,
-            name: closeupCity.name,
+            lon: closeupTarget.lon, lat: closeupTarget.lat,
+            name: closeupTarget.name,
           });
         });
       }
@@ -427,29 +693,7 @@ export class ActiveSimulation {
     // Named city pins from cities.json — the human anchor the feedback asked for.
     // Population only: a per-city "exposed" number would require the DEM bake
     // (deferred), and reusing the national all-hazard fraction here would mislead.
-    for (const city of (stats?.nearestCities ?? [])) {
-      this._track(this.viewer.entities.add({
-        position: Cesium.Cartesian3.fromDegrees(city.lon, city.lat),
-        point: {
-          pixelSize: 7,
-          color: Cesium.Color.fromCssColorString('#fde68a'),
-          outlineColor: Cesium.Color.fromCssColorString('#78350f'),
-          outlineWidth: 1,
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        },
-        label: {
-          text: `${city.name}\n${fmtCount(city.population)} people`,
-          font: '11px system-ui',
-          fillColor: Cesium.Color.fromCssColorString('#fef3c7'),
-          outlineColor: Cesium.Color.BLACK,
-          outlineWidth: 2,
-          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-          verticalOrigin: Cesium.VerticalOrigin.TOP,
-          pixelOffset: new Cesium.Cartesian2(0, 8),
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        },
-      }));
-    }
+    this._addCityPins(stats?.nearestCities);
   }
 
   /**
@@ -571,8 +815,19 @@ export class ActiveSimulation {
   // ═══════════════════════════════════════════════════════════════════════════
 
   async _renderWildfire() {
-    const { lon, lat } = this._getCenter();
+    const center = this._getCenter();
     const mag = Math.max(1, Math.min(10, this.command.params?.magnitude ?? 5));
+
+    // Burnable-land mask (bake_landmask.py): nudge the fire onto burnable ground
+    // when the parser centroid drifts offshore / onto ice, and clip the burn scar
+    // to it below. Null (bake not run yet) → unclipped centroid behavior.
+    const mask = await loadLandMask();
+    if (this._destroyed) return;
+    let { lon, lat } = center;
+    if (mask) {
+      const b = mask.nearestBurnable(lon, lat, 10);
+      if (b) { lon = b.lon; lat = b.lat; }
+    }
 
     const fireCanvas  = _FIRE_CANVAS;
     const smokeCanvas = _SMOKE_CANVAS;
@@ -582,20 +837,26 @@ export class ActiveSimulation {
     const rate       = 6 + mag * 3;
     const burnRadius = { val: 5000 };
 
-    // Ground burn scar glow
-    this._track(this.viewer.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(lon, lat),
-      ellipse: {
-        semiMajorAxis: new Cesium.CallbackProperty(() => burnRadius.val, false),
-        semiMinorAxis: new Cesium.CallbackProperty(() => burnRadius.val * 0.7, false),
-        height: 50,
-        material: new Cesium.ColorMaterialProperty(
-          new Cesium.CallbackProperty(() =>
-            Cesium.Color.fromCssColorString('#cc3300')
-              .withAlpha(0.32 + Math.sin(this._elapsed() * 3.5) * 0.10),
-            false)),
-      },
-    }));
+    // Ground burn scar — clipped to the burnable mask when available (skips
+    // water/ice cells, so a coastal fire follows the shoreline instead of a
+    // perfect ellipse). Falls back to the expanding ellipse without the mask.
+    if (mask) {
+      this._renderBurnableScar(mask, lon, lat, fireR, burnRadius);
+    } else {
+      this._track(this.viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(lon, lat),
+        ellipse: {
+          semiMajorAxis: new Cesium.CallbackProperty(() => burnRadius.val, false),
+          semiMinorAxis: new Cesium.CallbackProperty(() => burnRadius.val * 0.7, false),
+          height: 50,
+          material: new Cesium.ColorMaterialProperty(
+            new Cesium.CallbackProperty(() =>
+              Cesium.Color.fromCssColorString('#cc3300')
+                .withAlpha(0.32 + Math.sin(this._elapsed() * 3.5) * 0.10),
+              false)),
+        },
+      }));
+    }
 
     // Fire column
     const fireOrigin = Cesium.Cartesian3.fromDegrees(lon, lat, 0);
@@ -618,8 +879,12 @@ export class ActiveSimulation {
     this.viewer.scene.primitives.add(fire);
     this._track(fire);
 
-    // Smoke column (higher altitude, larger)
+    // Smoke column (higher altitude, larger), drifting on prevailing winds.
+    // Direction is a latitude-band climatology (tropical/polar easterlies,
+    // mid-latitude westerlies), NOT a forecast — decorative, so nothing on
+    // screen claims a wind speed. The force accelerates each particle downwind.
     const smokeOrigin = Cesium.Cartesian3.fromDegrees(lon, lat, 8000);
+    const windForce = this._prevailingWindForce(lon, lat);
     const smoke = new Cesium.ParticleSystem({
       image: smokeCanvas,
       modelMatrix: Cesium.Transforms.eastNorthUpToFixedFrame(smokeOrigin),
@@ -635,6 +900,11 @@ export class ActiveSimulation {
       endScale:   6.0,
       minimumImageSize: new Cesium.Cartesian2(20000, 20000),
       maximumImageSize: new Cesium.Cartesian2(65000, 65000),
+      updateCallback: (p, dt) => {
+        p.velocity.x += windForce.x * dt;
+        p.velocity.y += windForce.y * dt;
+        p.velocity.z += windForce.z * dt;
+      },
     });
     this.viewer.scene.primitives.add(smoke);
     this._track(smoke);
@@ -659,19 +929,36 @@ export class ActiveSimulation {
     this.viewer.scene.primitives.add(embers);
     this._track(embers);
 
-    this._track(this.viewer.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(lon, lat + fireR / 111_000 + 1.5),
-      label: {
-        text: `Wildfire  Severity ${mag.toFixed(0)}/10`,
-        font: 'bold 14px system-ui',
-        fillColor: Cesium.Color.fromCssColorString('#ffa040'),
-        outlineColor: Cesium.Color.BLACK,
-        outlineWidth: 2,
-        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
-      },
-    }));
+    // ── Label reads BAKED data — the fire's driver (temperature anomaly) and
+    // fuel-dryness proxy (precip change) are in climate.json. The old
+    // `Severity mag/10` label was fabricated from the parser magnitude (the
+    // rule-#4 failure mode). Fire stays localized — a wildfire is not nationwide,
+    // so unlike heatwave/drought the geometry is NOT polygon-bound to the country.
+    let stats = null;
+    try {
+      stats = await getImpactStats({
+        eventType: 'wildfire', iso: this.command.target,
+        year: this.year, ssp: this.ssp, center: { lon, lat },
+      });
+    } catch (_) { /* label falls back below */ }
+    if (this._destroyed) return;
+
+    const anomaly = stats?.raw?.tempAnomalyC;
+    const precip  = stats?.raw?.precipChangePct;
+    const lines   = ['Wildfire'];
+    if (anomaly != null) {
+      lines[0] = `Wildfire  ${anomaly >= 0 ? '+' : ''}${anomaly.toFixed(1)}°C anomaly (CMIP6 ${this.ssp})`;
+    }
+    if (precip != null) {
+      lines.push(`Precipitation ${precip >= 0 ? '+' : ''}${precip.toFixed(1)}% annual`
+        + `${precip < 0 ? ' — drier fuels' : ''}`);
+    }
+    const anchorCity = stats?.nearestCities?.[0];
+    if (anchorCity) {
+      lines.push(`${anchorCity.name} — ${fmtCount(anchorCity.population)} people`);
+    }
+
+    this._addStatLabel(lon, lat + fireR / 111_000 + 1.5, lines.join('\n'), '#ffa040');
 
     this._addPostRenderListener(() => {
       if (this._destroyed) return;
@@ -686,6 +973,93 @@ export class ActiveSimulation {
     });
   }
 
+  /**
+   * Burn scar clipped to the burnable-land mask: draw a translucent cell for
+   * each burnable grid cell within fireR of the fire, revealed outward as the
+   * burn radius grows. Skips water/ice cells, so the scar hugs the coastline
+   * instead of spilling into the sea. Cell count is small (fireR ≲ 150 km at
+   * ~28 km cells → a handful across) and hard-capped for the 30fps budget.
+   *
+   * @param {import('./LandMaskGeodata.js').LandMask} mask
+   * @param {number} lon @param {number} lat @param {number} fireR
+   * @param {{val:number}} burnRadius - shared 5 km→fireR animation driver
+   */
+  _renderBurnableScar(mask, lon, lat, fireR, burnRadius) {
+    const res = mask.resDeg;
+    const cosLat = Math.max(0.1, Math.cos(Cesium.Math.toRadians(lat)));
+    const spanCols = Math.ceil((fireR / (111_000 * cosLat)) / res) + 1;
+    const spanRows = Math.ceil((fireR / 111_000) / res) + 1;
+    const c0 = Math.floor((lon + 180) / res);
+    const r0 = Math.floor((90 - lat) / res);
+    const MAX_CELLS = 220;
+
+    let cells = 0;
+    for (let dr = -spanRows; dr <= spanRows && cells < MAX_CELLS; dr++) {
+      for (let dc = -spanCols; dc <= spanCols && cells < MAX_CELLS; dc++) {
+        const clon = -180 + (c0 + dc + 0.5) * res;
+        const clat = 90 - (r0 + dr + 0.5) * res;
+        const dxM = (clon - lon) * 111_000 * cosLat;
+        const dyM = (clat - lat) * 111_000;
+        const distM = Math.hypot(dxM, dyM);
+        if (distM > fireR) continue;
+        if (!mask.isBurnable(clon, clat)) continue;
+
+        const w = -180 + (c0 + dc) * res;
+        const s = 90 - (r0 + dr + 1) * res;
+        // Skip cells crossing the antimeridian / poles → Rectangle throws on
+        // west>east or lat out of range (rare: a fire within fireR of ±180°).
+        if (w < -180 || w + res > 180 || s < -90 || s + res > 90) continue;
+        this._track(this.viewer.entities.add({
+          rectangle: {
+            coordinates: Cesium.Rectangle.fromDegrees(w, s, w + res, s + res),
+            height: 50,
+            material: new Cesium.ColorMaterialProperty(
+              new Cesium.CallbackProperty(() => {
+                // Cell ignites once the growing burn radius reaches it.
+                const lit = burnRadius.val >= distM;
+                const a = lit ? 0.30 + Math.sin(this._elapsed() * 3.5 + distM * 1e-4) * 0.10 : 0;
+                return Cesium.Color.fromCssColorString('#cc3300').withAlpha(a);
+              }, false)),
+          },
+        }));
+        cells++;
+      }
+    }
+  }
+
+  /**
+   * Prevailing-wind drift force (world-space Cartesian3) for smoke, from a
+   * coarse latitude-band climatology — tropical & polar easterlies, mid-latitude
+   * westerlies, with a slight poleward lean. Decorative direction only; no wind
+   * speed is claimed anywhere on screen.
+   *
+   * @param {number} lon @param {number} lat
+   * @returns {Cesium.Cartesian3} force applied to particle velocity per second
+   */
+  _prevailingWindForce(lon, lat) {
+    const absLat = Math.abs(lat);
+    const eastSign = (absLat < 30 || absLat >= 60) ? -1 : 1; // easterlies vs westerlies
+    const northSign = lat >= 0 ? 0.2 : -0.2;                 // slight poleward lean
+
+    const originC = Cesium.Cartesian3.fromDegrees(lon, lat);
+    const enu = Cesium.Transforms.eastNorthUpToFixedFrame(originC);
+    const eCol = Cesium.Matrix4.getColumn(enu, 0, new Cesium.Cartesian4());
+    const nCol = Cesium.Matrix4.getColumn(enu, 1, new Cesium.Cartesian4());
+    const eastV  = new Cesium.Cartesian3(eCol.x, eCol.y, eCol.z);
+    const northV = new Cesium.Cartesian3(nCol.x, nCol.y, nCol.z);
+
+    const force = new Cesium.Cartesian3();
+    Cesium.Cartesian3.add(
+      Cesium.Cartesian3.multiplyByScalar(eastV, eastSign, new Cesium.Cartesian3()),
+      Cesium.Cartesian3.multiplyByScalar(northV, northSign, new Cesium.Cartesian3()),
+      force);
+    Cesium.Cartesian3.normalize(force, force);
+    // ~2.5 m/s² over an 18–32 s smoke life ≈ 45–80 m/s lateral, comparable to the
+    // 25–75 m/s rise speed → smoke leans over as it climbs (a drift, not a blast).
+    const WIND_ACCEL = 2.5;
+    return Cesium.Cartesian3.multiplyByScalar(force, WIND_ACCEL, force);
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // M4: Drought  (choropleth-anim)
   // Animated ground fill: green → yellow → orange → deep brown
@@ -696,8 +1070,30 @@ export class ActiveSimulation {
     const mag    = Math.max(1, Math.min(5, this.command.params?.magnitude ?? 3));
     const radius = 350_000 + mag * 80_000;
 
+    // Real numbers FIRST — the baked drought_index drives the fill SEVERITY, not
+    // only the label. (Before, the color came from the parser magnitude, so a
+    // near-zero index could still shade a whole country deep brown — the rule #4
+    // failure the USA eyeball caught: label "index 0.09" under a severe-orange
+    // fill.) Fetched once here; the label below reuses this same `stats`.
+    let stats = null;
+    try {
+      stats = await getImpactStats({
+        eventType: 'drought', iso: this.command.target,
+        year: this.year, ssp: this.ssp, center: { lon, lat },
+      });
+    } catch (_) { /* falls back to magnitude-only visuals + a bare label */ }
+    if (this._destroyed) return;
+
+    // 0 (none) → 1 (extreme). Baked index when present; else the parser
+    // magnitude as a last-resort visual for null/unknown targets (the label
+    // only ever *names* an index when one is actually baked).
+    const bakedIdx = stats?.raw?.droughtIndex;
+    const severityTarget = bakedIdx != null
+      ? Math.max(0, Math.min(1, bakedIdx))
+      : (mag / 5);
+
     const droughtColor = () => {
-      const t = Math.min(1, this._elapsed() / 10) * (mag / 5);
+      const t = Math.min(1, this._elapsed() / 10) * severityTarget;
       if (t < 0.33) {
         return Cesium.Color.lerp(
           Cesium.Color.fromCssColorString('#4ade80'),
@@ -716,19 +1112,89 @@ export class ActiveSimulation {
       }
     };
 
-    // Main drought zone
-    this._track(this.viewer.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(lon, lat),
-      ellipse: {
-        semiMajorAxis: radius,
-        semiMinorAxis: radius * 0.72,
-        height: 100,
-        material: new Cesium.ColorMaterialProperty(
-          new Cesium.CallbackProperty(droughtColor, false)),
-      },
-    }));
+    // Main drought zone — bound to real geometry (VISUAL_UPGRADE_PLAN:
+    // polygon-anchored, not a centroid ellipse), in preference order:
+    //   1. admin-1 CHOROPLETH — baked state/province boundaries (bake_admin1.py),
+    //      every region filled with the same color from the country's NATIONAL
+    //      drought_index (rule #4: geometry is sub-national, the value is not —
+    //      the label says so). Adds the state/province legibility the feedback
+    //      asked for and auto-upgrades if per-region climate is ever baked.
+    //   2. national boundary polygon — when the admin-1 file isn't baked yet.
+    //   3. centroid ellipse — null/unknown target (sub-national / regional).
+    const droughtMat = new Cesium.ColorMaterialProperty(
+      new Cesium.CallbackProperty(droughtColor, false));
+    const regionOutline = new Cesium.CallbackProperty(
+      () => Cesium.Color.fromCssColorString('#78350f')
+        .withAlpha(Math.min(1, this._elapsed() / 8) * 0.5), false);
 
-    // Concentric ring cracks (progressive severity markers)
+    const addDroughtPolygon = ({ outer, holes }, outlined) => {
+      this._track(this.viewer.entities.add({
+        polygon: {
+          hierarchy: new Cesium.PolygonHierarchy(
+            Cesium.Cartesian3.fromDegreesArray(outer),
+            holes.map((h) => new Cesium.PolygonHierarchy(
+              Cesium.Cartesian3.fromDegreesArray(h)))),
+          height: 100,
+          arcType: Cesium.ArcType.GEODESIC,
+          granularity: Cesium.Math.toRadians(2),
+          material: droughtMat,
+          outline: outlined,
+          outlineColor: outlined ? regionOutline : undefined,
+          outlineWidth: 1,
+        },
+      }));
+    };
+
+    let polygonBound = false;
+    let choropleth = false;
+
+    // 1. admin-1 choropleth (defensive polygon cap so archipelago nations can't
+    //    blow the 30fps entity budget).
+    try {
+      const admin1 = await loadAdmin1(this.command.target);
+      if (this._destroyed) return;
+      if (admin1?.regions?.length) {
+        let count = 0;
+        for (const region of admin1.regions) {
+          for (const poly of regionToPolygonRings(region)) {
+            if (count >= 250) break;
+            addDroughtPolygon(poly, true);
+            count++;
+          }
+          if (count >= 250) break;
+        }
+        polygonBound = count > 0;
+        choropleth = polygonBound;
+      }
+    } catch (_) { /* fall through to the national polygon */ }
+
+    // 2. national boundary polygon (interim until the admin-1 bake lands).
+    if (!polygonBound) {
+      try {
+        const feature = await getCountryFeature(this.command.target);
+        if (this._destroyed) return;
+        for (const rings of featureToPolygonRings(feature)) {
+          addDroughtPolygon(rings, false);
+          polygonBound = true;
+        }
+      } catch (_) { /* fall through to the ellipse */ }
+    }
+
+    if (!polygonBound) {
+      this._track(this.viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(lon, lat),
+        ellipse: {
+          semiMajorAxis: radius,
+          semiMinorAxis: radius * 0.72,
+          height: 100,
+          material: droughtMat,
+        },
+      }));
+    }
+
+    // Concentric ring cracks (progressive severity markers) — opacity scales
+    // with the baked severity, not the parser magnitude, so a mild index doesn't
+    // draw a severe-looking ring cage over a faint fill.
     for (let i = 0; i < 5; i++) {
       const r = radius * (0.18 + i * 0.16);
       this._track(this.viewer.entities.add({
@@ -740,7 +1206,7 @@ export class ActiveSimulation {
           outline: true,
           outlineColor: new Cesium.CallbackProperty(() =>
             Cesium.Color.fromCssColorString('#92400e')
-              .withAlpha(Math.min(1, this._elapsed() / 8) * 0.30 * (mag / 5)),
+              .withAlpha(Math.min(1, this._elapsed() / 8) * 0.30 * severityTarget),
             false),
           outlineWidth: 1,
           material: new Cesium.ColorMaterialProperty(Cesium.Color.TRANSPARENT),
@@ -748,20 +1214,30 @@ export class ActiveSimulation {
       }));
     }
 
-    const sevLabel = ['', 'Abnormal', 'Moderate', 'Severe', 'Extreme', 'Exceptional'][Math.round(mag)];
-    this._track(this.viewer.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(lon, lat + radius / 111_000 + 1.5),
-      label: {
-        text: `Drought  ${sevLabel}`,
-        font: 'bold 14px system-ui',
-        fillColor: Cesium.Color.fromCssColorString('#fde68a'),
-        outlineColor: Cesium.Color.BLACK,
-        outlineWidth: 2,
-        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
-      },
-    }));
+    // ── Label reads the SAME baked data that drives the fill severity above
+    // (drought_index + precip from climate.json). Falls back to a bare "Drought"
+    // if no baked data — never a synthesized severity.
+    const idx    = stats?.raw?.droughtIndex;
+    const precip = stats?.raw?.precipChangePct;
+    const lines  = ['Drought'];
+    if (idx != null) {
+      lines[0] = `Drought  index ${idx.toFixed(2)} (0 = none, 1 = extreme) (CMIP6 ${this.ssp})`;
+    }
+    // Honest disclosure (rule #4): the choropleth draws real admin-1 boundaries
+    // but every region carries the same NATIONAL value — say so on-screen so the
+    // uniform shading is never read as measured sub-national variation.
+    if (choropleth) {
+      lines.push('national value shown per region (sub-national CMIP6 not yet baked)');
+    }
+    if (precip != null) {
+      lines.push(`Precipitation ${precip >= 0 ? '+' : ''}${precip.toFixed(1)}% annual by ${this.year}`);
+    }
+    const anchorCity = stats?.nearestCities?.[0];
+    if (anchorCity) {
+      lines.push(`${anchorCity.name} — ${fmtCount(anchorCity.population)} people`);
+    }
+
+    this._addStatLabel(lon, lat + radius / 111_000 + 1.5, lines.join('\n'), '#fde68a');
 
     this._addPostRenderListener(() => {
       if (!this._destroyed) this.viewer.scene.requestRender();
@@ -921,19 +1397,7 @@ export class ActiveSimulation {
       lines.push(`${anchorCity.name} — ${fmtCount(anchorCity.population)} people`);
     }
 
-    this._track(this.viewer.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(lon, lat + radius / 111_000 + 1.5),
-      label: {
-        text: lines.join('\n'),
-        font: 'bold 14px system-ui',
-        fillColor: Cesium.Color.fromCssColorString('#fca5a5'),
-        outlineColor: Cesium.Color.BLACK,
-        outlineWidth: 2,
-        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
-      },
-    }));
+    this._addStatLabel(lon, lat + radius / 111_000 + 1.5, lines.join('\n'), '#fca5a5');
 
     this._addPostRenderListener(() => {
       if (!this._destroyed) this.viewer.scene.requestRender();
@@ -1035,20 +1499,38 @@ export class ActiveSimulation {
       }));
     }
 
-    const scaleLabel = ['', 'Local', 'Regional', 'National', 'Multi-national', 'Global'][Math.round(mag)];
-    this._track(this.viewer.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(lon, lat + flowLen / 111_000 + 2),
-      label: {
-        text: `Conflict  ${scaleLabel} scale`,
-        font: 'bold 14px system-ui',
-        fillColor: Cesium.Color.fromCssColorString('#fca5a5'),
-        outlineColor: Cesium.Color.BLACK,
-        outlineWidth: 2,
-        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
-      },
-    }));
+    // ── Label reads BAKED data — national population (World Bank) + the climate
+    // driver (temp anomaly) come from ImpactStats. The old `round(mag)` scale
+    // name was fabricated from the parser magnitude (rule-#4 failure mode). The
+    // displacement spokes above are schematic and radial ON PURPOSE — drawing
+    // arcs to real named destinations would imply migration routes we can't
+    // predict; the mandatory on-screen framing says so explicitly.
+    let stats = null;
+    try {
+      stats = await getImpactStats({
+        eventType: 'conflict', iso: this.command.target,
+        year: this.year, ssp: this.ssp, center: { lon, lat },
+      });
+    } catch (_) { /* label falls back below */ }
+    if (this._destroyed) return;
+
+    const pop     = stats?.raw?.population;
+    const anomaly = stats?.raw?.tempAnomalyC;
+    const lines   = ['Conflict'];
+    if (pop != null) {
+      lines.push(`${fmtCount(pop)} people nationally`);
+    }
+    if (anomaly != null) {
+      lines.push(`Climate driver: ${anomaly >= 0 ? '+' : ''}${anomaly.toFixed(1)}°C anomaly `
+        + `(CMIP6 ${this.ssp}) — water/crop stress`);
+    }
+    const anchorCity = stats?.nearestCities?.[0];
+    if (anchorCity) {
+      lines.push(`${anchorCity.name} — ${fmtCount(anchorCity.population)} people`);
+    }
+    lines.push('illustrative displacement — not a prediction');
+
+    this._addStatLabel(lon, lat + flowLen / 111_000 + 2, lines.join('\n'), '#fca5a5');
 
     this._addPostRenderListener(() => {
       if (!this._destroyed) this.viewer.scene.requestRender();

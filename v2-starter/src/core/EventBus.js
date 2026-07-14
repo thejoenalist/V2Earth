@@ -64,7 +64,8 @@ export const EventBus = {
  * layer:changed        { layerId: string }
  * ssp:changed          { ssp: string }
  * simulation:requested SimulationCommand (see SimulationCommand.js)
- * simulation:complete  { commandId: string }
+ * simulation:decision_requested { commandId: string, eventType: string|null }  — lifetime reached; ChatInterface prompts keep-or-clear
+ * simulation:complete  { commandId: string, eventType?: string|null }
  * chat:query           { text: string, sessionId: string }
  * session:start        { sessionId: string }
  * consent:changed      { granted: boolean }  — ConsentState → TelemetryService

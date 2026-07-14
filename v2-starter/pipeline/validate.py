@@ -251,6 +251,242 @@ def validate_pipeline_manifest(errors: list, warnings: list) -> bool:
     return True
 
 
+# ── Geodata (high-fidelity render layers) ─────────────────────────────────────
+
+def _num(x) -> bool:
+    """True for a real number (not a bool, which is an int subclass)."""
+    return isinstance(x, (int, float)) and not isinstance(x, bool)
+
+
+def _in_range(lon, lat) -> bool:
+    return _num(lon) and _num(lat) and -180 <= lon <= 180 and -90 <= lat <= 90
+
+
+def _validate_rings(rings, label: str, errors: list) -> None:
+    """A rings array: list of polygons, each ≥3 [lon,lat] points in range."""
+    if not isinstance(rings, list) or not rings:
+        errors.append(f"{label}: 'rings' missing or empty")
+        return
+    for i, ring in enumerate(rings):
+        if not isinstance(ring, list) or len(ring) < 3:
+            errors.append(f"{label}: ring[{i}] has fewer than 3 points")
+            continue
+        for pt in ring:
+            if not (isinstance(pt, (list, tuple)) and len(pt) >= 2 and _in_range(pt[0], pt[1])):
+                errors.append(f"{label}: ring[{i}] has a malformed / out-of-range [lon,lat] point")
+                break
+
+
+def _validate_slr_file(path: Path, errors: list, warnings: list) -> None:
+    """slr_<metro>.json — coastal inundation delta bands (bake_geodata.py)."""
+    tag = f"geodata/{path.name}"
+    data = load_json(path)
+    if not isinstance(data, dict):
+        errors.append(f"{tag}: not a JSON object / unreadable")
+        return
+
+    for key in ("_meta", "center", "bbox", "levels"):
+        if key not in data:
+            errors.append(f"{tag}: missing top-level key '{key}'")
+
+    center = data.get("center", {})
+    if not (isinstance(center, dict) and _in_range(center.get("lon"), center.get("lat"))):
+        errors.append(f"{tag}: 'center' must be {{lon,lat}} in range")
+
+    bbox = data.get("bbox")
+    if not (isinstance(bbox, list) and len(bbox) == 4 and all(_num(v) for v in bbox)):
+        errors.append(f"{tag}: 'bbox' must be [w,s,e,n] numbers")
+    elif not (bbox[0] < bbox[2] and bbox[1] < bbox[3]):
+        errors.append(f"{tag}: 'bbox' not ordered [w<e, s<n]: {bbox}")
+
+    levels = data.get("levels")
+    if not (isinstance(levels, dict) and levels):
+        errors.append(f"{tag}: 'levels' must be a non-empty object")
+        return
+    for lvl_key, lvl in levels.items():
+        try:
+            float(lvl_key)
+        except (TypeError, ValueError):
+            errors.append(f"{tag}: level key '{lvl_key}' is not a numeric string")
+        if not isinstance(lvl, dict):
+            errors.append(f"{tag}: level '{lvl_key}' is not an object")
+            continue
+        area = lvl.get("area_km2")
+        if not (_num(area) and area >= 0):
+            errors.append(f"{tag}: level '{lvl_key}' area_km2 missing or negative")
+        _validate_rings(lvl.get("rings"), f"{tag} level '{lvl_key}'", errors)
+
+
+def _validate_hurricane_file(path: Path, errors: list, warnings: list) -> None:
+    """hurricane_<metro>.json — analog track + optional bathtub surge (bake_tracks.py)."""
+    tag = f"geodata/{path.name}"
+    data = load_json(path)
+    if not isinstance(data, dict):
+        errors.append(f"{tag}: not a JSON object / unreadable")
+        return
+
+    meta = data.get("_meta")
+    if not isinstance(meta, dict):
+        errors.append(f"{tag}: missing '_meta'")
+    else:
+        analog = meta.get("analog", {})
+        if not isinstance(analog, dict) or not analog.get("sid"):
+            errors.append(f"{tag}: _meta.analog.sid (IBTrACS SID) missing")
+        pc = analog.get("peak_category") if isinstance(analog, dict) else None
+        if not (isinstance(pc, int) and not isinstance(pc, bool) and 1 <= pc <= 5):
+            errors.append(f"{tag}: _meta.analog.peak_category must be an int 1–5")
+        if meta.get("seed") is True:
+            warnings.append(f"{tag}: seed:true — hand-seeded placeholder; bake_tracks.py "
+                            f"overwrites it with real IBTrACS best-track in CI")
+
+    track = data.get("track")
+    if not (isinstance(track, list) and len(track) >= 2):
+        errors.append(f"{tag}: 'track' must have ≥2 points")
+    else:
+        for i, p in enumerate(track):
+            if not isinstance(p, dict) or not _in_range(p.get("lon"), p.get("lat")):
+                errors.append(f"{tag}: track[{i}] has an out-of-range lon/lat")
+                break
+            cat = p.get("category")
+            if not (isinstance(cat, int) and not isinstance(cat, bool) and 0 <= cat <= 5):
+                errors.append(f"{tag}: track[{i}].category must be an int 0–5")
+                break
+
+    lf = data.get("landfall")
+    if not (isinstance(lf, dict) and _in_range(lf.get("lon"), lf.get("lat"))):
+        errors.append(f"{tag}: 'landfall' must be {{lon,lat}} in range")
+
+    surge = data.get("surge")
+    if surge is not None:
+        if not isinstance(surge, dict):
+            errors.append(f"{tag}: 'surge' must be an object when present")
+        else:
+            if not (_num(surge.get("height_m")) and surge["height_m"] > 0):
+                errors.append(f"{tag}: surge.height_m must be a positive number")
+            if not (_num(surge.get("area_km2")) and surge["area_km2"] >= 0):
+                errors.append(f"{tag}: surge.area_km2 missing or negative")
+            _validate_rings(surge.get("rings"), f"{tag} surge", errors)
+
+
+def _validate_ring(ring, label: str, errors: list) -> None:
+    """A single polygon ring: ≥3 in-range [lon,lat] points."""
+    if not isinstance(ring, list) or len(ring) < 3:
+        errors.append(f"{label}: ring has fewer than 3 points")
+        return
+    for pt in ring:
+        if not (isinstance(pt, (list, tuple)) and len(pt) >= 2 and _in_range(pt[0], pt[1])):
+            errors.append(f"{label}: ring has a malformed / out-of-range [lon,lat] point")
+            return
+
+
+def _validate_admin1_file(path: Path, errors: list, warnings: list) -> None:
+    """admin1_<ISO>.json — state/province boundaries for the drought choropleth."""
+    tag = f"geodata/{path.name}"
+    data = load_json(path)
+    if not isinstance(data, dict):
+        errors.append(f"{tag}: not a JSON object / unreadable")
+        return
+
+    if not isinstance(data.get("_meta"), dict):
+        errors.append(f"{tag}: missing '_meta'")
+    if not isinstance(data.get("iso"), str) or not data.get("iso"):
+        errors.append(f"{tag}: 'iso' must be a non-empty string")
+
+    regions = data.get("regions")
+    if not (isinstance(regions, list) and regions):
+        errors.append(f"{tag}: 'regions' must be a non-empty array")
+        return
+    for ri, region in enumerate(regions):
+        if not isinstance(region, dict):
+            errors.append(f"{tag}: region[{ri}] is not an object")
+            continue
+        polys = region.get("polygons")
+        if not (isinstance(polys, list) and polys):
+            errors.append(f"{tag}: region[{ri}] 'polygons' must be a non-empty array")
+            continue
+        for pi, poly in enumerate(polys):
+            if not isinstance(poly, dict):
+                errors.append(f"{tag}: region[{ri}].polygons[{pi}] is not an object")
+                continue
+            _validate_ring(poly.get("outer"), f"{tag} region[{ri}].polygons[{pi}] outer", errors)
+            holes = poly.get("holes", [])
+            if not isinstance(holes, list):
+                errors.append(f"{tag}: region[{ri}].polygons[{pi}] 'holes' must be a list")
+                continue
+            for hi, hole in enumerate(holes):
+                _validate_ring(hole, f"{tag} region[{ri}].polygons[{pi}] hole[{hi}]", errors)
+
+
+def _validate_landmask_file(path: Path, errors: list, warnings: list) -> None:
+    """landmask.json — global burnable-land bitmask for the wildfire render."""
+    import base64
+    import math
+    tag = f"geodata/{path.name}"
+    data = load_json(path)
+    if not isinstance(data, dict):
+        errors.append(f"{tag}: not a JSON object / unreadable")
+        return
+
+    w, h = data.get("width"), data.get("height")
+    if not (isinstance(w, int) and w > 0 and isinstance(h, int) and h > 0):
+        errors.append(f"{tag}: 'width'/'height' must be positive integers")
+        return
+    if not (_num(data.get("res_deg")) and data["res_deg"] > 0):
+        errors.append(f"{tag}: 'res_deg' must be a positive number")
+    bbox = data.get("bbox")
+    if not (isinstance(bbox, list) and len(bbox) == 4 and all(_num(v) for v in bbox)):
+        errors.append(f"{tag}: 'bbox' must be [w,s,e,n] numbers")
+    packed = data.get("packed")
+    if not isinstance(packed, str) or not packed:
+        errors.append(f"{tag}: 'packed' must be a non-empty base64 string")
+        return
+    try:
+        raw = base64.b64decode(packed, validate=True)
+    except Exception:
+        errors.append(f"{tag}: 'packed' is not valid base64")
+        return
+    need = math.ceil(w * h / 8)
+    if len(raw) < need:
+        errors.append(f"{tag}: packed bytes {len(raw)} < ceil(w*h/8)={need}")
+
+
+def validate_geodata(errors: list, warnings: list) -> bool:
+    """
+    Validates public/data/geodata/*.json — the high-fidelity render layers
+    (coastal inundation deltas + hurricane analog tracks/surge).
+
+    These are OPTIONAL: each render falls back gracefully when its metro file is
+    absent, so a missing file/dir is a warning, not an error. But every number
+    and polygon in a present file reaches the screen verbatim (rule #4), so any
+    file that IS shipped must be well-formed — malformed geometry is a hard error.
+    """
+    geo_dir = BAKED_DATA_DIR / "geodata"
+    if not geo_dir.is_dir():
+        warnings.append("geodata/ absent — high-fidelity render layers not baked yet "
+                        "(renders use generic fallbacks). Run bake_geodata.py + bake_tracks.py.")
+        return True
+
+    slr_files = sorted(geo_dir.glob("slr_*.json"))
+    hur_files = sorted(geo_dir.glob("hurricane_*.json"))
+    adm_files = sorted(geo_dir.glob("admin1_*.json"))
+    landmask = geo_dir / "landmask.json"
+    if not slr_files and not hur_files and not adm_files and not landmask.exists():
+        warnings.append("geodata/ present but has no slr_*/hurricane_*/admin1_*/landmask files.")
+        return True
+
+    n_err_before = len(errors)
+    for path in slr_files:
+        _validate_slr_file(path, errors, warnings)
+    for path in hur_files:
+        _validate_hurricane_file(path, errors, warnings)
+    for path in adm_files:
+        _validate_admin1_file(path, errors, warnings)
+    if landmask.exists():
+        _validate_landmask_file(landmask, errors, warnings)
+
+    return len(errors) == n_err_before
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 VALIDATORS = {
@@ -259,6 +495,7 @@ VALIDATORS = {
     "attribution": validate_attribution,
     "geojson":     validate_geojson,
     "manifest":    validate_pipeline_manifest,
+    "geodata":     validate_geodata,
 }
 
 

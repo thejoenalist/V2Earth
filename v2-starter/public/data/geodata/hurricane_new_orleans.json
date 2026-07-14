@@ -1,0 +1,30 @@
+{
+  "_meta": {
+    "metro": "new_orleans",
+    "display": "New Orleans",
+    "analog": {
+      "name": "Katrina",
+      "year": 2005,
+      "sid": "2005236N23285",
+      "peak_category": 5
+    },
+    "track_source": "Hand-seeded coarse waypoints (approximate) pending the IBTrACS bake — pipeline/bake_tracks.py overwrites this with real best-track points in CI. SID references IBTrACS v04r01 (NOAA NCEI, public domain).",
+    "seed": true,
+    "baked_at": "2026-07-12T00:00:00Z",
+    "caveats": [
+      "Track is a real historical storm shown as an analog — NOT a forecast for this location or date.",
+      "These are coarse hand-seeded waypoints, not full best-track resolution, until pipeline/bake_tracks.py runs in CI."
+    ]
+  },
+  "track": [
+    { "lon": -75.1, "lat": 23.2, "wind_kt": 30,  "category": 0 },
+    { "lon": -80.1, "lat": 25.9, "wind_kt": 70,  "category": 1 },
+    { "lon": -81.8, "lat": 25.2, "wind_kt": 85,  "category": 2 },
+    { "lon": -85.0, "lat": 24.5, "wind_kt": 125, "category": 4 },
+    { "lon": -88.6, "lat": 25.7, "wind_kt": 150, "category": 5 },
+    { "lon": -89.6, "lat": 28.2, "wind_kt": 125, "category": 4 },
+    { "lon": -89.6, "lat": 29.3, "wind_kt": 110, "category": 3 },
+    { "lon": -89.6, "lat": 31.0, "wind_kt": 70,  "category": 1 }
+  ],
+  "landfall": { "lon": -89.6, "lat": 29.3 }
+}

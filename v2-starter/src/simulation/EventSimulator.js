@@ -8,7 +8,9 @@
  *  - eject:true on an incoming command clears the entire stack first,
  *    then optionally starts the new event clean
  *  - When the stack is full (3 layers), the oldest is evicted before adding the new one
- *  - Each simulation ends naturally after SIMULATION_LIFETIME_MS (simulation:complete)
+ *  - After SIMULATION_LIFETIME_MS a sim emits simulation:decision_requested;
+ *    ChatInterface prompts keep-or-clear and emits simulation:complete when the
+ *    user clears it (or the grace window lapses), which triggers teardown here
  *
  * EventBus contract:
  *   Listens:  simulation:requested  { command: SimulationCommand }
@@ -41,6 +43,9 @@ export class EventSimulator {
     /** @type {ActiveSimulation[]} Ordered oldest→newest */
     this._stack = [];
 
+    /** Monotonic token so a newer command cancels an in-flight SSP sweep. */
+    this._sweepToken = 0;
+
     this._boundOnRequested = this._onRequested.bind(this);
     this._boundOnEject     = this._onEject.bind(this);
     this._boundOnComplete  = this._onComplete.bind(this);
@@ -71,6 +76,25 @@ export class EventSimulator {
     if (command.eject === true) {
       this._clearStack('user_requested');
       if (!incomingEvent) return;
+    }
+
+    // timeline_jump: the chapter is already snapped by ChatInterface (it sets
+    // TimeController.year before emitting simulation:requested). All we add here
+    // is camera framing when the query named a place.
+    if (command.type === 'timeline_jump') {
+      if (command.target) this._renderer.flyToISO?.(command.target);
+      return;
+    }
+
+    // scenario_compare: frame the region, then sweep the pathway
+    // SSP2-4.5 → SSP5-8.5 so any active data layer, the open CountryPanel, the
+    // SSP toggle, and the session story all re-render against the worse case.
+    // The numeric delta card is rendered separately by ChatInterface from baked
+    // climate.json (rule #4 — the LLM never supplies these numbers).
+    if (command.type === 'scenario_compare') {
+      if (command.target) this._renderer.flyToISO?.(command.target);
+      await this._sweepSSP();
+      return;
     }
 
     // region_inspect: fly the camera to the country and open the inspector
@@ -143,6 +167,21 @@ export class EventSimulator {
       this._destroySim(sim);
       this._emitStackChanged();
     }
+  }
+
+  /**
+   * SSP sweep for scenario_compare: animate the pathway low→high. Each setSSP
+   * fires ssp:changed + time:changed, so active data layers, the open
+   * CountryPanel, the SSP toggle UI, and telemetry all follow. The sweep settles
+   * on SSP5-8.5 — the divergence the user asked to see; the delta card makes the
+   * exact gap explicit. Token-guarded so a newer command cancels a stale sweep.
+   */
+  async _sweepSSP() {
+    const token = ++this._sweepToken;
+    this._time.setSSP('SSP2-4.5');
+    await new Promise((resolve) => setTimeout(resolve, 2200));
+    if (token !== this._sweepToken) return; // superseded by a newer command
+    this._time.setSSP('SSP5-8.5');
   }
 
   /** Eject triggered directly via EventBus (e.g. from UI button) */

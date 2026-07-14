@@ -197,3 +197,79 @@ Open Action Items.
 - **Honest-limits UI:** each upgraded render gets a one-line data-caveat in its chat
   response (resolution, analog framing, bathtub caveat). This is what keeps an
   environmental scientist on side.
+
+---
+
+## 6. Addendum (2026-07-12) — SLR data source: NOAA Digital Coast vs. baked DEM
+
+Origin: doubt that the §3.1 approach (F3 baked Copernicus GLO-30 bathtub inundation)
+is the right *long-term* foundation for the flagship sea-level render. Question raised:
+can we pull NOAA's Sea Level Rise Viewer (coast.noaa.gov/digitalcoast/tools/slr.html)
+data in instead? Answer: yes, and it's a real option — but it's a partial swap, not a
+clean replacement. Findings below so we can decide deliberately.
+
+### 6.1 What NOAA actually exposes
+Two integration-friendly forms beyond the web viewer:
+- **Live ArcGIS REST map services** — `https://www.coast.noaa.gov/arcgis/rest/services/dc_slr`.
+  Per-scenario `MapServer` endpoints, confirmed live: `slr_0ft … slr_10ft` in **0.5 ft
+  steps**, `conf_0ft … conf_10ft` (mapping confidence), `marsh_000 … marsh_1000` (marsh
+  migration), plus `Data_Extent` and `Point_Layers`. NOAA hosts, updates, and vets them.
+- **Raw data download** — `https://coast.noaa.gov/slrdata`. The DEM-derived inundation
+  rasters/GIS, i.e. the same product we could bake through `bake_geodata.py` ourselves.
+
+### 6.2 Cesium fit
+Each `MapServer` is consumed natively by `ArcGisMapServerImageryProvider`, draped over
+the World Terrain we already load in `GlobeRenderer`. Rise animation = crossfade `alpha`
+across the scenario layers:
+
+```js
+const slr3 = await Cesium.ArcGisMapServerImageryProvider.fromUrl(
+  "https://www.coast.noaa.gov/arcgis/rest/services/dc_slr/slr_3ft/MapServer"
+);
+const layer = viewer.imageryLayers.addImageryProvider(slr3);
+layer.alpha = 0.7; // drive 0→10 ft by fading scenario layers in/out
+```
+
+### 6.3 Why it's attractive long-term
+NOAA owns hosting, updates, and methodology — the same authority whose caveat language
+§3.1 already borrows. No DEM pipeline for us to maintain; half-foot scenarios out of the
+box (finer than our 0.5/1/2 m bathtub steps); confidence and marsh-migration layers we
+would never bake ourselves.
+
+### 6.4 Why it's not a clean swap — tensions to resolve
+- **Live external dependency vs. baked-data rule 5.** This is the crux. Calling the
+  services live introduces a network dependency at render time, outside our offline/quota
+  control, that NOAA can change or deprecate. That directly contradicts the "all data is
+  baked" principle §5 leans on. Reading the raw `slrdata` download through the existing
+  pipeline honors rule 5; calling the MapServers live does not.
+- **US-only coverage.** `dc_slr` is contiguous US coasts (no Great Lakes), AK, HI, and
+  territories. It cannot render Jakarta, Dhaka, Lagos, Shanghai, or Rotterdam — half the
+  §2 flagship list. So NOAA can be *a* source, never the *sole* source; the GLO-30 bathtub
+  path still has to exist for international metros. Two code paths regardless.
+- **Draped raster, not vector.** Layers arrive as pre-styled raster imagery, not polygons.
+  That makes the **delta band (land lost) in a contrasting color** — the exact thing §3.1
+  and the original critique center on — harder: we'd get "blue over flooded areas," not
+  clean current-vs-flooded delta geometry or per-city "% land below X m." Deriving the
+  delta from raster is more work than a baked polygon where we own the geometry.
+- **Dynamic export, not a tile cache.** Rendered on demand per view — snappy at regional
+  zoom, not meant for whole-globe draping; scope to the AOI. And **CORS must be verified**
+  from our origin, since Cesium needs cross-origin access for imagery.
+
+### 6.5 Recommendation (proposed, not locked)
+Keep F3 baked inundation as the portable, offline, globally-uniform, vector-delta-capable
+foundation — it's what keeps the delta band and the non-US metros possible. Layer NOAA
+`dc_slr` in as an **optional high-fidelity US overlay** for flagship close-ups (Miami,
+NOLA, NYC, Norfolk), where its half-foot scenarios + confidence layer beat our GLO-30
+steps, and reuse NOAA's published caveats we already cite. Gate it behind the same
+lazy-load + fps budget as everything else. Validate CORS and a single Miami crossfade POC
+before committing any of this into `SeaLevelLayer.js`.
+
+### 6.6 Open question for the source decision
+"Works long term" has two readings, and they point at different implementations:
+1. *Maintained by someone credible so it won't rot* → live NOAA services, accept the
+   rule-5 exception for the US path.
+2. *No fragile runtime dependency* → download `slrdata` and **bake it through the existing
+   pipeline** (US-only, but higher-res than GLO-30), stay fully rule-5 compliant, no live
+   calls.
+
+Both are viable; they're mutually exclusive for the US path. Needs a call before build.

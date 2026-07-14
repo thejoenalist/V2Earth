@@ -39,6 +39,9 @@ on:
           - boundaries
           - cities
           - geodata
+          - tracks
+          - admin1
+          - landmask
           - validate
 
 # The auto-commit step pushes refreshed data back to main; the default
