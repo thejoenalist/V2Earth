@@ -65,7 +65,7 @@ SPARSE_THRESHOLD = 0.3   # confidence below this → flag as sparse in the outpu
 def load_json(path: Path) -> dict | list | None:
     if not path.exists():
         return None
-    with open(path) as f:
+    with open(path, encoding="utf-8-sig") as f:
         return json.load(f)
 
 
