@@ -48,7 +48,7 @@ REGISTRY = {
     },
     "miami": {
         "display": "Miami", "basin": "NA",
-        "sid": "1992228N11318", "name": "Andrew", "year": 1992,
+        "sid": "1992230N11325", "name": "Andrew", "year": 1992,
         "metro_lon": -80.19, "metro_lat": 25.78,
     },
     "nyc": {
