@@ -450,6 +450,69 @@ def _validate_landmask_file(path: Path, errors: list, warnings: list) -> None:
         errors.append(f"{tag}: packed bytes {len(raw)} < ceil(w*h/8)={need}")
 
 
+def validate_cities(errors: list, warnings: list) -> bool:
+    """
+    Validates public/data/cities.json — city pins, populations, and the
+    DEM-derived mean_elev_m enrichment (bake_city_elevation.py). Every value
+    here reaches the screen via ImpactStats city callouts (rule #4).
+    """
+    path = BAKED_DATA_DIR / "cities.json"
+    data = load_json(path)
+
+    if data is None:
+        errors.append("cities.json missing — run pipeline/fetch_cities.py")
+        return False
+
+    cities = data.get("cities")
+    if not isinstance(cities, list) or len(cities) < 500:
+        errors.append(f"cities.json: expected ≥500 cities, got "
+                      f"{len(cities) if isinstance(cities, list) else 'none'}")
+        return False
+
+    n_err_before = len(errors)
+    n_elev = 0
+    for i, c in enumerate(cities):
+        if not isinstance(c, dict):
+            errors.append(f"cities.json: cities[{i}] is not an object")
+            continue
+        if not c.get("name") or not isinstance(c.get("iso"), str):
+            errors.append(f"cities.json: cities[{i}] missing name/iso")
+        if not _in_range(c.get("lon"), c.get("lat")):
+            errors.append(f"cities.json: cities[{i}] ({c.get('name')}) lon/lat "
+                          f"missing or out of range")
+        pop = c.get("population")
+        if not (isinstance(pop, int) and not isinstance(pop, bool) and pop > 0):
+            errors.append(f"cities.json: cities[{i}] ({c.get('name')}) population "
+                          f"must be a positive integer")
+        elev = c.get("mean_elev_m")
+        if elev is not None:
+            if not _num(elev) or not (-450.0 <= elev <= 9000.0):
+                errors.append(f"cities.json: {c.get('name')} mean_elev_m = {elev} "
+                              f"outside sanity bounds [-450, 9000]")
+            else:
+                n_elev += 1
+
+    if n_elev < 50:
+        warnings.append(f"cities.json: only {n_elev} cities carry mean_elev_m — "
+                        f"run bake_city_elevation.py (CI 'elevation' dispatch) so "
+                        f"the SLR close-up can pick the true low point")
+
+    # Flagship anchors must exist for the metro city callouts. The 2026-07-13
+    # weekly cron regenerated cities.json from GeoNames (city-proper ranking)
+    # and silently dropped Miami — this warning is the tripwire for that
+    # regression class. Warning, not error: a stale city list must not brick
+    # unrelated dispatches (each run's fetch_cities rebake fixes it).
+    flagship_anchors = ["Miami", "New Orleans", "Jakarta", "Houston", "Dhaka"]
+    names = {c.get("name") for c in cities if isinstance(c, dict)}
+    missing = [n for n in flagship_anchors if n not in names]
+    if missing:
+        warnings.append(f"cities.json: flagship anchor cities missing: "
+                        f"{', '.join(missing)} — city-proper-ranked source? "
+                        f"Re-run fetch_cities.py (Natural Earth is primary)")
+
+    return len(errors) == n_err_before
+
+
 def validate_geodata(errors: list, warnings: list) -> bool:
     """
     Validates public/data/geodata/*.json — the high-fidelity render layers
@@ -494,6 +557,7 @@ VALIDATORS = {
     "worldbank":   validate_world_bank,
     "attribution": validate_attribution,
     "geojson":     validate_geojson,
+    "cities":      validate_cities,
     "manifest":    validate_pipeline_manifest,
     "geodata":     validate_geodata,
 }

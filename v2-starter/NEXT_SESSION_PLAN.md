@@ -41,12 +41,19 @@ in-sandbox (mount truncates validate.py on read) — **run `python pipeline/vali
 2. ~~**Add `validate.py` geodata checks.**~~ ✅ 2026-07-13 — `validate_geodata`
    covers `slr_*.json` (levels, `area_km2`, rings) and `hurricane_*.json` (track
    category 0–5, `landfall`, IBTrACS `sid`, `peak_category` 1–5; optional `surge`).
-3. **Run the pipeline** (CI cron or manual dispatch) → real Miami/NYC/New Orleans
-   analog tracks + Miami/New Orleans bathtub surge land, overwriting the committed
-   Katrina seed (`seed:true` → `false`). Verify a "hurricane in New Orleans" render.
-4. **Backfill `mean_elev_m`** for the coastal flagship cities in `cities.json`
-   (only ~44/1006 populated; Miami/Miami Beach null). Batched here as data-polish so
-   the SLR close-up flies to the genuine low point, not the fallback.
+3. ~~**Run the pipeline**~~ ✅ 2026-07-14 — all three metros baked (Katrina 31 pts,
+   Sandy 40 pts, Andrew 47 pts after SID correction to 1992230N11325), seeds gone;
+   SLR expanded to 4 metros. Manual render checks still owed (see
+   `VERIFY_CHECKLIST_2026-07-14.md`).
+4. ~~**Backfill `mean_elev_m`**~~ ✅ 2026-07-14 (code) — NEW
+   `pipeline/bake_city_elevation.py`: DEM window-mean (±0.005°, land cells only,
+   water/nodata excluded) for every city inside flagship-metro tile coverage;
+   reuses `bake_geodata` helpers + warm `.dem_cache` (wired after `bake_tracks` in
+   `bake_all.py`); overwrites hand-authored values (DEM more defensible);
+   `--only elevation` workflow dispatch added; new `cities` validator in
+   `validate.py` (schema + mean_elev_m bounds + under-enrichment warning).
+   Synthetic-DEM unit test green; deps-missing path exits 0. Data lands when the
+   `elevation` dispatch runs.
 
 Exit: hurricane flagship is fully live; SLR close-up picks the true low point.
 
@@ -149,12 +156,30 @@ Exit: drought and wildfire reach their full spec; `bake_geodata.py` foundations
 
 ## Phase C — breadth + stretch (deferred)
 
-7. **Extend the template to schema-tier (19) + noted-tier (10) events** as each
-   render is built — polygon-anchored geometry + ImpactStats + city callouts is the
-   pattern, not a per-event one-off.
-8. **Hurricane Phase 3** — NOAA SLOSH-MOM surge fidelity + more analog metros; only
-   if the category-typical bathtub surge proves too coarse. See
-   `HURRICANE_TRACKS_PLAN.md`.
+7. ~~**Extend the template to schema-tier (19) + noted-tier (10) events**~~
+   ✅ 2026-07-14 (code) — `_renderGenericEvent` in `ActiveSimulation.js`: ALL
+   schema/noted-tier events now route to the shared template instead of the
+   placeholder (dispatch branches on `EVENT_TYPES[…].status`; non_climate/unknown
+   keep the honest placeholder). Three extent modes to avoid the wildfire lesson
+   (over-claiming): `national` (real country polygon; 11 country-scale events like
+   crop_failure/epidemic_outbreak), `ocean` (blue ellipse; 6 marine events), `local`
+   (default modest ellipse — tornado/landslide/earthquake etc. never paint a whole
+   nation). ImpactStats default branch supplies the label (temp anomaly CMIP6-tagged
+   + precip + population + nearest-city callout) + city pins; magnitude sizes
+   visuals only; fixed honest line "…— not a modeled footprint" always on-screen.
+   A bespoke render later just claims its strategy string in the routes map.
+   No EVENT_TYPES/prompt change → no edge-function resync. Manual checks in
+   `VERIFY_CHECKLIST_2026-07-14.md` §4.
+8. ~~**Hurricane Phase 3**~~ ✅ 2026-07-14 (code; data pending `tracks` dispatch) —
+   metros: `houston`/Ike 2008 (also added to `bake_geodata.METROS` → 5th SLR
+   flagship in the same pass) + `dhaka`/Sidr 2007 (first non-Atlantic basin, NI;
+   track-only by design — Ganges-delta bathtub needs its own honesty pass); both in
+   `FLAGSHIP_METROS` (partial-geodata metros degrade per-kind). Robustness:
+   `build_track` resolves by NAME+SEASON (closest-approach tie-break) when the
+   registry SID misses and writes the resolved SID to `_meta.analog.sid`.
+   SLOSH-MOM assessed and **deferred** with rationale in `HURRICANE_TRACKS_PLAN.md`
+   (trigger not demonstrated; CONUS-only; CI budget). Drive-by: `bake_tracks`'s
+   dep guard now catches `SystemExit` (bake_geodata exits at import time).
 
 ---
 

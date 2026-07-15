@@ -23,8 +23,14 @@ const FLAGSHIP_METROS = [
   { key: 'nyc',         display: 'New York City', lon: -74.00, lat: 40.71, matchRadiusDeg: 2.0 },
   { key: 'new_orleans', display: 'New Orleans',   lon: -90.07, lat: 29.95, matchRadiusDeg: 2.0 },
   { key: 'jakarta',     display: 'Jakarta',       lon: 106.83, lat: -6.17, matchRadiusDeg: 2.0 },
+  // Phase 3 (2026-07-14). A metro may have only one kind of geodata —
+  // houston has slr_+hurricane_, dhaka hurricane_ only (track-only analog),
+  // jakarta slr_ only; the loaders resolve a missing file to null, so a
+  // partial metro degrades to the generic render for the missing kind.
+  { key: 'houston',     display: 'Houston–Galveston', lon: -95.36, lat: 29.76, matchRadiusDeg: 2.0 },
+  { key: 'dhaka',       display: 'Dhaka',         lon: 90.41,  lat: 23.81, matchRadiusDeg: 2.0 },
   // Enable as bake_geodata.py METROS grows:
-  // norfolk, houston_galveston, dhaka, lagos, shanghai, rotterdam
+  // norfolk, lagos, shanghai, rotterdam
 ];
 
 /** @type {Map<string, Promise<Object|null>>} */

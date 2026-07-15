@@ -1,16 +1,19 @@
 {
-  "validated_at": "2026-07-15T00:28:47.794478+00:00",
+  "validated_at": "2026-07-15T03:23:36.671652+00:00",
   "passed": true,
   "results": {
     "climate": "PASS",
     "worldbank": "PASS",
     "attribution": "PASS",
     "geojson": "PASS",
+    "cities": "PASS",
     "manifest": "PASS",
     "geodata": "PASS"
   },
   "error_count": 0,
-  "warning_count": 0,
+  "warning_count": 1,
   "errors": [],
-  "warnings": []
+  "warnings": [
+    "cities.json: only 30 cities carry mean_elev_m \u2014 run bake_city_elevation.py (CI 'elevation' dispatch) so the SLR close-up can pick the true low point"
+  ]
 }

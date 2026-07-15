@@ -40,6 +40,11 @@ IBTRACS_CSV = (
 # Curated analog registry: metro -> the historical storm we show for that coast.
 # metro_lon/lat are used only to pick the nearest-approach point as landfall.
 # Jakarta is intentionally absent — near-equator, no meaningful TC landfall.
+#
+# sid is a best-effort hint: if it matches nothing in the basin CSV, the bake
+# resolves the storm by NAME + SEASON (closest approach to the metro breaks
+# ties) and writes the resolved SID to _meta.analog.sid. Hand-written SIDs
+# already burned one session (Andrew's needed correcting on 2026-07-14).
 REGISTRY = {
     "new_orleans": {
         "display": "New Orleans", "basin": "NA",
@@ -55,6 +60,24 @@ REGISTRY = {
         "display": "New York City", "basin": "NA",
         "sid": "2012296N14283", "name": "Sandy", "year": 2012,
         "metro_lon": -74.00, "metro_lat": 40.71,
+    },
+    # Phase 3 metros (2026-07-14):
+    "houston": {
+        # Ike (2008) — the canonical Galveston Bay surge storm; Harvey (2017)
+        # was considered but its damage signature is rain flooding, not surge,
+        # so Ike is the defensible surge analog for this coast.
+        "display": "Houston–Galveston", "basin": "NA",
+        "sid": "2008245N17323", "name": "Ike", "year": 2008,
+        "metro_lon": -95.36, "metro_lat": 29.76,
+    },
+    "dhaka": {
+        # Sidr (2007) — Cat-5-equivalent Bay of Bengal cyclone, canonical
+        # Bangladesh landfall. TRACK-ONLY for now: no DEM tiles registered in
+        # bake_geodata.METROS — a bathtub over the Ganges delta floodplain
+        # would be enormous and needs its own file-budget/honesty pass first.
+        "display": "Dhaka", "basin": "NI",
+        "sid": "2007314N10093", "name": "Sidr", "year": 2007,
+        "metro_lon": 90.41, "metro_lat": 23.81,
     },
 }
 
@@ -97,15 +120,11 @@ def fetch_basin_rows(basin: str):
     return reader, idx
 
 
-def build_track(cfg: dict):
-    reader, idx = fetch_basin_rows(cfg["basin"])
-    sid = cfg["sid"]
+def _rows_to_points(rows, idx):
+    """Shape raw IBTrACS rows into 6-hourly track points."""
     col = lambda row, name: row[idx[name]] if name in idx else ""
-
     pts = []
-    for row in reader:
-        if not row or col(row, "SID") != sid:
-            continue
+    for row in rows:
         iso = col(row, "ISO_TIME")
         try:
             hour = datetime.fromisoformat(iso).hour
@@ -123,6 +142,55 @@ def build_track(cfg: dict):
             "category": _category(col(row, "USA_SSHS")),
         })
     return pts
+
+
+def build_track(cfg: dict):
+    """Return (points, resolved_sid).
+
+    Tries the registry SID first; if it matches nothing, falls back to
+    NAME + SEASON (closest approach to the metro breaks ties between storms
+    reusing a name in one season) and reports the resolved SID so it lands in
+    _meta.analog.sid. One pass over the basin CSV either way.
+    """
+    reader, idx = fetch_basin_rows(cfg["basin"])
+    col = lambda row, name: row[idx[name]] if name in idx else ""
+    sid = cfg["sid"]
+    want_name = cfg["name"].upper()
+    want_season = str(cfg["year"])
+
+    sid_rows = []
+    name_rows = {}  # candidate SID -> rows
+    for row in reader:
+        if not row:
+            continue
+        row_sid = col(row, "SID")
+        if row_sid == sid:
+            sid_rows.append(row)
+        elif (col(row, "NAME").upper() == want_name
+              and col(row, "SEASON").strip() == want_season):
+            name_rows.setdefault(row_sid, []).append(row)
+
+    if sid_rows:
+        return _rows_to_points(sid_rows, idx), sid
+
+    if not name_rows:
+        return [], sid
+
+    # Resolve by name+season; nearest approach to the metro breaks ties.
+    best_sid, best_pts, best_d = None, [], float("inf")
+    for cand_sid, rows in name_rows.items():
+        pts = _rows_to_points(rows, idx)
+        if len(pts) < 2:
+            continue
+        d = min((p["lon"] - cfg["metro_lon"]) ** 2 + (p["lat"] - cfg["metro_lat"]) ** 2
+                for p in pts)
+        if d < best_d:
+            best_sid, best_pts, best_d = cand_sid, pts, d
+    if best_sid:
+        print(f"  registry SID {sid} not found — resolved "
+              f"{cfg['name']} {cfg['year']} by name+season to {best_sid}")
+        return best_pts, best_sid
+    return [], sid
 
 
 def nearest_landfall(pts, mlon, mlat):
@@ -147,7 +215,9 @@ def compute_surge(key: str, peak_category: int, cache_dir: Path):
         from bake_geodata import (
             METROS, download_dem, read_dem_mosaic, bathtub_delta, mask_to_rings,
         )
-    except Exception as e:
+    except (Exception, SystemExit) as e:
+        # SystemExit too: bake_geodata sys.exit(1)s at import time when its
+        # geo deps are missing, and SystemExit is not an Exception subclass.
         print(f"[{key}] surge skipped (geo deps unavailable: {e})")
         return None
     if key not in METROS:
@@ -184,12 +254,13 @@ def compute_surge(key: str, peak_category: int, cache_dir: Path):
 def bake_metro(key: str, cfg: dict, cache_dir: Path) -> bool:
     print(f"[{key}] baking track for {cfg['name']} ({cfg['year']}) …")
     try:
-        pts = build_track(cfg)
+        pts, resolved_sid = build_track(cfg)
     except Exception as e:  # network / parse — skip, keep any existing seed
         print(f"[{key}] SKIPPED ({e})", file=sys.stderr)
         return False
     if len(pts) < 2:
-        print(f"[{key}] SKIPPED (no track points for SID {cfg['sid']})", file=sys.stderr)
+        print(f"[{key}] SKIPPED (no track points for SID {cfg['sid']} "
+              f"or name '{cfg['name']}'/{cfg['year']})", file=sys.stderr)
         return False
 
     peak = max(p["category"] for p in pts)
@@ -210,7 +281,7 @@ def bake_metro(key: str, cfg: dict, cache_dir: Path) -> bool:
             "metro": key, "display": cfg["display"],
             "analog": {
                 "name": cfg["name"], "year": cfg["year"],
-                "sid": cfg["sid"], "peak_category": peak,
+                "sid": resolved_sid, "peak_category": peak,
             },
             "track_source": "IBTrACS v04r01 (NOAA NCEI, public domain)",
             "surge_source": (

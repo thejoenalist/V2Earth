@@ -172,6 +172,35 @@ documented for `slr_miami.json`.
 - **Later — SLOSH MOM fidelity** and more metros, if the bathtub caveat proves
   too coarse.
 
+### Phase 3 status (2026-07-14)
+
+**More metros: DONE (code; data pending the next `tracks` dispatch).**
+Registry gains `houston` (Ike 2008 — the canonical Galveston Bay surge storm;
+Harvey was considered and rejected: its damage signature is rain flooding, not
+surge) and `dhaka` (Sidr 2007, North Indian basin — first non-Atlantic analog;
+TRACK-ONLY since a bathtub over the Ganges delta floodplain needs its own
+file-budget/honesty pass before shipping). `houston` was also added to
+`bake_geodata.METROS` (Galveston Bay tiles), so the same dispatch pair yields
+Ike surge AND a fifth SLR flagship (`slr_houston.json`). Both metros added to
+`FLAGSHIP_METROS` in `InundationGeodata.js` — a metro with only one kind of
+geodata degrades to the generic render for the missing kind (loaders resolve
+missing files to null).
+
+**Robustness:** `build_track` now resolves the storm by NAME + SEASON (closest
+metro approach breaks ties) when the registry SID misses, and writes the
+resolved SID to `_meta.analog.sid` — hand-written SIDs already burned one
+session (Andrew, corrected 2026-07-14). New-metro SIDs are best-effort hints.
+
+**SLOSH-MOM: assessed and DEFERRED.** Rationale: (1) the trigger condition —
+"bathtub proves too coarse" — has not been demonstrated; nobody has eyeballed
+the baked surge footprints against known Ike/Katrina extents yet; (2) SLOSH
+MOM composites are CONUS-only, so they can never serve Dhaka or any future
+WP/NI metro — the bathtub is the only surge model that scales with the
+registry; (3) the MOM rasters are a per-basin multi-GB fetch that would
+dominate the 30-minute CI budget. Revisit only after a real-machine eyeball of
+the baked Ike/Katrina surge vs. published high-water extents shows the bathtub
+materially misleading.
+
 **Smallest useful first slice:** Phase 1 for a single metro. It needs only
 IBTrACS + the analog registry + a polyline in `_renderHurricane`; no DEM, no new
 schema beyond `track`/`landfall`. It de-risks the loader/registry pattern before

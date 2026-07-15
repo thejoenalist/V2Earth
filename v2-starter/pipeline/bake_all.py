@@ -33,6 +33,8 @@ FETCHERS = [
     ("bake_geodata.py", "Coastal inundation polygons (Copernicus GLO-30 DEM)"),
     # After bake_geodata.py: bake_tracks' surge reuses its DEM helpers + tile cache.
     ("bake_tracks.py", "Hurricane analog tracks + surge (IBTrACS + GLO-30)"),
+    # After bake_tracks.py: city elevation reuses the warm .dem_cache tiles.
+    ("bake_city_elevation.py", "City mean_elev_m from DEM (flagship metro coverage)"),
     ("bake_admin1.py", "Admin-1 boundaries for drought choropleth (Natural Earth 10m, global)"),
     ("bake_landmask.py", "Burnable land+ice mask for wildfire (Natural Earth 50m)"),
     ("build_attribution.py", "Data source attribution (CC BY 4.0)"),

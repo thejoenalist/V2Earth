@@ -108,8 +108,19 @@ METROS = {
             "Copernicus_DSM_COG_10_S06_00_E106_00_DEM",
         ],
     },
+    "houston": {
+        "display": "Houston–Galveston",
+        # Galveston Bay + the ship channel up toward Houston proper — the
+        # surge-critical geography for the Ike analog (bake_tracks.py).
+        "bbox": (-95.40, 29.05, -94.60, 29.80),
+        "center": {"lon": -95.36, "lat": 29.76},
+        "tiles": [
+            "Copernicus_DSM_COG_10_N29_00_W096_00_DEM",
+            "Copernicus_DSM_COG_10_N29_00_W095_00_DEM",
+        ],
+    },
     # Next in priority order (add tiles when enabling):
-    # "norfolk", "houston_galveston", "dhaka", "lagos", "shanghai", "rotterdam"
+    # "norfolk", "dhaka", "lagos", "shanghai", "rotterdam"
 }
 
 CAVEATS = [

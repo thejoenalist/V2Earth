@@ -2,7 +2,9 @@
  * ActiveSimulation — one executing simulation in the stack.
  *
  * Milestone 4: All 6 "ready" event renders are fully implemented.
- * Remaining events fall back to _renderPlaceholder until their milestone.
+ * Schema/noted-tier events route to _renderGenericEvent (polygon/ellipse +
+ * ImpactStats + city callouts — the shared template, CLAUDE.md item #16);
+ * only non-climate/unknown types fall back to _renderPlaceholder.
  *
  * Memory contract: every CesiumJS object (Entity, Primitive, ParticleSystem,
  * PostProcessStage, postRender listener) is tracked in this._owned and
@@ -186,7 +188,17 @@ export class ActiveSimulation {
       'atmospheric-shimmer': () => this._renderHeatwave(),
       'flow-vectors':        () => this._renderConflict(),
     };
-    const fn = routes[strategy] ?? (() => this._renderPlaceholder());
+    let fn = routes[strategy];
+    if (!fn) {
+      // Schema/noted-tier events get the generic template (polygon/ellipse +
+      // ImpactStats + city callouts — CLAUDE.md item #16). Non-climate events
+      // (solar_storm) and unknown types keep the honest placeholder: climate
+      // stats on a non-climate event would be a fabricated causal claim.
+      const status = this.eventType ? EVENT_TYPES[this.eventType]?.status : null;
+      fn = (status === 'schema' || status === 'noted')
+        ? () => this._renderGenericEvent()
+        : () => this._renderPlaceholder();
+    }
     await fn();
   }
 
@@ -1543,7 +1555,154 @@ export class ActiveSimulation {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // Placeholder — events not yet implemented beyond M4
+  // Generic template — schema-tier (19) + noted-tier (10) events
+  // Polygon-anchored geometry + ImpactStats + city callouts (CLAUDE.md #16).
+  // The pattern, not a per-event one-off: a bespoke render replaces this by
+  // adding its strategy string to the routes map in _dispatch.
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  async _renderGenericEvent() {
+    const { lon, lat } = this._getCenter();
+    const mag    = Math.max(1, Math.min(5, this.command.params?.magnitude ?? 3));
+    const meta   = EVENT_TYPES[this.eventType] ?? {};
+    const label  = meta.label ?? this.eventType ?? 'Event';
+
+    // Extent honesty (the wildfire lesson): binding a localized hazard to the
+    // whole country boundary falsely implies nationwide impact, and binding an
+    // ocean event to land is just wrong. Three modes:
+    //   national — country-scale phenomena → real boundary polygon
+    //   ocean    — marine events → ellipse at center over water
+    //   local    — everything else (default; a modest ellipse never over-claims)
+    const NATIONAL = new Set([
+      'epidemic_outbreak', 'power_grid_failure', 'infrastructure_cascade',
+      'crop_failure', 'wet_bulb_exceedance', 'permafrost_thaw', 'blizzard',
+      'wildfire_smoke', 'compound_fire_weather', 'dust_storm', 'locust_swarm',
+    ]);
+    const OCEAN = new Set([
+      'tsunami', 'coral_bleaching', 'harmful_algal_bloom', 'marine_heatwave',
+      'ocean_acidification', 'amoc_slowdown',
+    ]);
+    const mode = OCEAN.has(this.eventType) ? 'ocean'
+      : NATIONAL.has(this.eventType) ? 'national' : 'local';
+
+    // magnitude sizes VISUALS ONLY (rule #4) — all displayed numbers are baked.
+    const radius = (mode === 'local' ? 120_000 : 250_000) + mag * 60_000;
+    const tint   = mode === 'ocean' ? '#38bdf8' : '#a78bfa';
+    const pulsing = new Cesium.ColorMaterialProperty(
+      new Cesium.CallbackProperty(() =>
+        Cesium.Color.fromCssColorString(tint)
+          .withAlpha(0.10 + Math.sin(this._elapsed() * 1.6) * 0.04),
+        false));
+
+    let polygonBound = false;
+    if (mode === 'national') {
+      try {
+        const feature = await getCountryFeature(this.command.target);
+        if (this._destroyed) return;
+        for (const { outer, holes } of featureToPolygonRings(feature)) {
+          this._track(this.viewer.entities.add({
+            polygon: {
+              hierarchy: new Cesium.PolygonHierarchy(
+                Cesium.Cartesian3.fromDegreesArray(outer),
+                holes.map((h) => new Cesium.PolygonHierarchy(
+                  Cesium.Cartesian3.fromDegreesArray(h)))),
+              height: 100,
+              arcType: Cesium.ArcType.GEODESIC,
+              // Same geometry-worker guard as heatwave/drought — complex
+              // coastlines crash finer granularity settings.
+              granularity: Cesium.Math.toRadians(2),
+              material: pulsing,
+            },
+          }));
+          polygonBound = true;
+        }
+      } catch (_) { /* fall through to the ellipse */ }
+    }
+
+    if (!polygonBound) {
+      this._track(this.viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(lon, lat),
+        ellipse: {
+          semiMajorAxis: radius,
+          semiMinorAxis: radius * 0.8,
+          height: 100,
+          material: pulsing,
+          outline: true,
+          outlineColor: Cesium.Color.fromCssColorString(tint).withAlpha(0.55),
+          outlineWidth: 2,
+        },
+      }));
+    }
+
+    // Expanding pulse ring — visual life within the 30fps budget.
+    this._track(this.viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(lon, lat),
+      ellipse: {
+        semiMajorAxis: new Cesium.CallbackProperty(() => {
+          const t = (this._elapsed() * 0.25) % 1;
+          return radius * (0.2 + t * 1.2);
+        }, false),
+        semiMinorAxis: new Cesium.CallbackProperty(() => {
+          const t = (this._elapsed() * 0.25) % 1;
+          return radius * 0.8 * (0.2 + t * 1.2);
+        }, false),
+        height: 200,
+        outline: true,
+        outlineColor: new Cesium.CallbackProperty(() => {
+          const t = (this._elapsed() * 0.25) % 1;
+          return Cesium.Color.fromCssColorString(tint).withAlpha((1 - t) * 0.4);
+        }, false),
+        outlineWidth: 1.5,
+        material: new Cesium.ColorMaterialProperty(Cesium.Color.TRANSPARENT),
+      },
+    }));
+
+    // ── Baked stats label (ImpactStats default branch: temp anomaly + precip
+    // + national population) — never the parser magnitude on-screen.
+    let stats = null;
+    try {
+      stats = await getImpactStats({
+        eventType: this.eventType, iso: this.command.target,
+        year: this.year, ssp: this.ssp, center: { lon, lat },
+      });
+    } catch (_) { /* label falls back below */ }
+    if (this._destroyed) return;
+
+    const anomaly = stats?.raw?.tempAnomalyC;
+    const precip  = stats?.raw?.precipChangePct;
+    const lines = [label];
+    if (anomaly != null) {
+      lines.push(`${anomaly >= 0 ? '+' : ''}${anomaly.toFixed(1)}°C anomaly by ${this.year} (CMIP6 ${this.ssp})`);
+    }
+    if (precip != null) {
+      lines.push(`Precipitation ${precip >= 0 ? '+' : ''}${precip.toFixed(1)}% annual`);
+    }
+    const anchorCity = stats?.nearestCities?.[0];
+    if (anchorCity) {
+      lines.push(`${anchorCity.name} — ${fmtCount(anchorCity.population)} people`);
+    }
+    // Honest framing, always on-screen: the geometry is indicative, and for
+    // national mode the boundary is an extent anchor, not a modeled footprint.
+    lines.push(mode === 'national'
+      ? 'national extent shown — not a modeled footprint'
+      : 'illustrative extent — not a modeled footprint');
+
+    this._addStatLabel(lon, lat + radius / 111_000 + 1.5, lines.join('\n'), '#c4b5fd');
+    this._addCityPins(stats?.nearestCities);
+
+    this._addPostRenderListener(() => {
+      if (!this._destroyed) this.viewer.scene.requestRender();
+    });
+
+    this.viewer.camera.flyTo({
+      destination: Cesium.Cartesian3.fromDegrees(lon, lat - 2, radius * 3.2),
+      duration: 2.5,
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Placeholder — non-climate events (solar_storm) + unknown types only;
+  // schema/noted tiers now route to _renderGenericEvent.
   // ═══════════════════════════════════════════════════════════════════════════
 
   async _renderPlaceholder() {

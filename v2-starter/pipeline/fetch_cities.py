@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Fetch major world cities → public/data/cities.json  (VISUAL_UPGRADE_PLAN F1)
 
-STATUS: STUB. The committed public/data/cities.json currently holds a small,
-hand-authored set of approximate published figures so the ImpactStats +
-city-pin foundation could ship without network access to GeoNames. This script
-is the intended regeneration path; run it (with network access) to replace the
-placeholder with a full GeoNames-derived dataset.
+PRIMARY source: Natural Earth 10m populated places (public domain) — pop_max
+ranks by urban agglomeration, so flagship metros with small city-proper cores
+(Miami!) make the top-1000 cut. GeoNames cities15000 (CC BY 4.0) is an
+explicit fallback only: it ranks by city-proper population and the 2026-07-13
+weekly cron run proved it silently drops Miami (~440k proper vs ~5.5M metro).
 
-Source: GeoNames cities500 / cities1000 dump (CC BY 4.0).
-  https://download.geonames.org/export/dump/cities1000.zip
+  python pipeline/fetch_cities.py            # auto: NE, GeoNames on failure
+  python pipeline/fetch_cities.py ne         # force Natural Earth
+  python pipeline/fetch_cities.py geonames   # force GeoNames
 
 Output schema (matches the placeholder):
   {
@@ -179,21 +180,28 @@ def apply_enrichment(cities: list[dict], keep: dict) -> int:
 def main() -> None:
     source_arg = sys.argv[1] if len(sys.argv) > 1 else "auto"
 
+    # Natural Earth is the PRIMARY source (2026-07-14). It carries pop_max
+    # (urban agglomeration), which is what _meta.population_basis promises.
+    # GeoNames cities15000 ranks by CITY-PROPER population, so major metros
+    # with small city cores fall below the top-1000 cutoff — the 2026-07-13
+    # weekly cron run (GeoNames reachable in CI, tried first back then)
+    # silently regenerated cities.json WITHOUT a Miami row, breaking the
+    # flagship city callouts. GeoNames remains an explicit opt-in fallback.
     rows, source_tag = None, None
-    if source_arg in ("auto", "geonames"):
+    if source_arg in ("auto", "ne", "naturalearth"):
         try:
-            print(f"Fetching GeoNames dump: {GEONAMES_URL}")
-            rows = fetch_geonames()
-            source_tag = "GeoNames cities15000 (CC BY 4.0)"
-        except Exception as e:  # network-restricted environment — fall back
-            if source_arg == "geonames":
+            print(f"Fetching Natural Earth populated places: {NE_REPO}")
+            rows = fetch_natural_earth()
+            source_tag = "Natural Earth 10m populated places (public domain)"
+        except Exception as e:
+            if source_arg != "auto":
                 raise
-            print(f"GeoNames unreachable ({e.__class__.__name__}); "
-                  f"falling back to Natural Earth via GitHub.")
+            print(f"Natural Earth unreachable ({e.__class__.__name__}); "
+                  f"falling back to GeoNames.")
     if rows is None:
-        print(f"Fetching Natural Earth populated places: {NE_REPO}")
-        rows = fetch_natural_earth()
-        source_tag = "Natural Earth 10m populated places (public domain)"
+        print(f"Fetching GeoNames dump: {GEONAMES_URL}")
+        rows = fetch_geonames()
+        source_tag = "GeoNames cities15000 (CC BY 4.0)"
 
     cities = build_cities(rows)
     enriched = apply_enrichment(cities, load_enrichment())
