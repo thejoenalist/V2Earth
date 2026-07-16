@@ -89,8 +89,9 @@
       server-side proxy to <strong>Anthropic</strong> (the maker of the Claude language
       model), which processes it to generate the simulator's response. This happens
       regardless of your telemetry choice — it is how the chat works — but Anthropic
-      receives only the message text and scenario context (year, climate pathway),
-      never a stored profile of you. See
+      receives only your chat messages from the current session (recent messages are
+      included with each request so replies stay coherent) and scenario context
+      (year, climate pathway), never a stored profile of you. See
       <a href="https://www.anthropic.com/legal/privacy" rel="noopener" target="_blank">Anthropic's privacy policy</a>.
     </p>
 

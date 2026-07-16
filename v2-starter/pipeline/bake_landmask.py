@@ -14,8 +14,13 @@ Until it runs, _renderWildfire keeps its current centroid behavior (no clipping)
 the loader resolves to null and never throws.
 
 Honest scope (mirror in _meta.note + surface nothing false on-screen):
-  - Land vs water + ice only. Deserts / barren / urban are NOT excluded — that
-    needs a land-cover product (MODIS / ESA WorldCover), a documented follow-up.
+  - Land vs water + ice, minus MAJOR NAMED DESERTS (Natural Earth 1:10m
+    geography regions, featurecla=Desert — Sahara, Gobi, the Australian
+    Outback deserts, etc.; decision locked 2026-07-16). This fixes the
+    Outback-fire-on-sand eyeball and, via the render's nearestBurnable nudge,
+    biases placement toward vegetated land. It is still NOT a full land-cover
+    product: unnamed barren/urban areas are not excluded (MODIS / ESA
+    WorldCover remains the documented fuller follow-up).
   - Coarse grid (RES_DEG): block-level, not parcel-level. A small coastal fire
     near a cell boundary may read as on/off by one ~25 km cell.
 
@@ -47,12 +52,15 @@ NE_BASE = ("https://raw.githubusercontent.com/nvkelso/natural-earth-vector/"
            "master/geojson/")
 LAND_URL = NE_BASE + "ne_50m_land.geojson"
 ICE_URL = NE_BASE + "ne_50m_glaciated_areas.geojson"
+# 1:10m geography regions (~24 MB) — the only NE product carrying named desert
+# polygons; longer timeout for it, same pattern as the admin-1 1:10m fetch.
+DESERT_URL = NE_BASE + "ne_10m_geography_regions_polys.geojson"
 
 
-def _fetch_geojson(url: str) -> dict:
+def _fetch_geojson(url: str, timeout: int = 120) -> dict:
     print(f"  downloading {url.rsplit('/', 1)[-1]} …")
     req = urllib.request.Request(url, headers={"User-Agent": "earthsim-pipeline"})
-    with urllib.request.urlopen(req, timeout=120) as r:  # noqa: S310 fixed https host
+    with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310 fixed https host
         return json.loads(r.read().decode("utf-8", errors="replace"))
 
 
@@ -60,6 +68,15 @@ def _geoms(fc: dict):
     for feat in fc.get("features", []):
         g = feat.get("geometry")
         if g:
+            yield (g, 1)
+
+
+def _desert_geoms(fc: dict):
+    """Named desert polygons only (featurecla == 'Desert')."""
+    for feat in fc.get("features", []):
+        g = feat.get("geometry")
+        cla = str(feat.get("properties", {}).get("featurecla", "")).strip().lower()
+        if g and cla == "desert":
             yield (g, 1)
 
 
@@ -78,6 +95,21 @@ def main() -> int:
         print(f"bake_landmask: SKIPPED (source unavailable: {e})", file=sys.stderr)
         return 0
 
+    # Desert exclusion is best-effort: a failed fetch (or a featurecla drift
+    # matching 0 features) degrades to the land-minus-ice mask rather than
+    # killing the bake; _meta.desert_excluded records which mask shipped.
+    desert_feats = []
+    try:
+        deserts = _fetch_geojson(DESERT_URL, timeout=300)
+        desert_feats = list(_desert_geoms(deserts))
+        if not desert_feats:
+            print("bake_landmask: WARNING — geography regions fetched but no "
+                  "featurecla='Desert' features found (schema drift?); deserts "
+                  "NOT excluded", file=sys.stderr)
+    except Exception as e:
+        print(f"bake_landmask: WARNING — desert source unavailable ({e}); "
+              f"deserts NOT excluded", file=sys.stderr)
+
     width = int(round(360.0 / RES_DEG))
     height = int(round(180.0 / RES_DEG))
     transform = from_origin(-180.0, 90.0, RES_DEG, RES_DEG)
@@ -91,6 +123,17 @@ def main() -> int:
 
     burnable = (land_mask == 1) & (ice_mask == 0)
 
+    # Named-desert cut (all_touched=False on purpose: only cells whose center
+    # region is desert are excluded, so desert-EDGE cells — where vegetation
+    # transitions begin — stay burnable rather than over-excluding).
+    desert_excluded = False
+    if desert_feats:
+        desert_mask = rasterize(desert_feats, out_shape=(height, width),
+                                transform=transform, fill=0, default_value=1,
+                                dtype="uint8", all_touched=False)
+        burnable &= (desert_mask == 0)
+        desert_excluded = True
+
     # Antarctica cut: force every row whose cell-center latitude ≤ -60 to False.
     row_lat = 90.0 - (np.arange(height) + 0.5) * RES_DEG
     burnable[row_lat <= ANTARCTICA_LAT, :] = False
@@ -98,14 +141,24 @@ def main() -> int:
     packed = np.packbits(burnable.astype(np.uint8).ravel())  # MSB-first, row-major
     b64 = base64.b64encode(packed.tobytes()).decode("ascii")
 
+    src = "Natural Earth 1:50m land minus glaciated_areas (public domain)"
+    if desert_excluded:
+        src += " minus 1:10m geography-regions named deserts"
+        note = ("burnable = land AND NOT ice AND NOT named desert; Antarctica "
+                "(lat ≤ -60) excluded. Named deserts only (NE geography "
+                "regions) — unnamed barren/urban areas are NOT excluded; a "
+                "full land-cover product (MODIS / ESA WorldCover) remains the "
+                "fuller follow-up. Coarse grid, block-level accuracy.")
+    else:
+        note = ("burnable = land AND NOT ice; Antarctica (lat ≤ -60) excluded. "
+                "Desert source unavailable this bake — deserts NOT excluded. "
+                "Coarse grid, block-level accuracy.")
     doc = {
         "_meta": {
-            "source": "Natural Earth 1:50m land minus glaciated_areas (public domain)",
+            "source": src,
             "baked_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "note": "burnable = land AND NOT ice; Antarctica (lat ≤ -60) excluded. "
-                    "Deserts / barren / urban are NOT excluded — that needs a "
-                    "land-cover product (MODIS / ESA WorldCover). Coarse grid, "
-                    "block-level accuracy.",
+            "note": note,
+            "desert_excluded": desert_excluded,
             "burnable_cells": int(burnable.sum()),
         },
         "width": width,
@@ -122,7 +175,8 @@ def main() -> int:
     out.write_text(json.dumps(doc, separators=(",", ":")), encoding="utf-8")
     pct = 100.0 * burnable.sum() / burnable.size
     print(f"bake_landmask: {width}×{height} grid, {burnable.sum()} burnable cells "
-          f"({pct:.1f}%) → {out} ({out.stat().st_size/1024:.0f} KB)")
+          f"({pct:.1f}%), deserts {'excluded' if desert_excluded else 'NOT excluded'} "
+          f"→ {out} ({out.stat().st_size/1024:.0f} KB)")
     return 0
 
 

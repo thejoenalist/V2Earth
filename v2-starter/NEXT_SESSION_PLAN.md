@@ -17,6 +17,17 @@ Everything below this block is DONE and verified in CI. State at close:
   flagship-anchor tripwire; dataset regenerated + coastal flags restored.
 - **Still owed (ONLY remaining item from this plan):** the manual render
   eyeball pass — `VERIFY_CHECKLIST_2026-07-14.md` §2 + §4.
+  ✅ DONE 2026-07-16 — user ran §2+§4 on the real machine (localhost:5173):
+  all hurricane/SLR/generic checks pass; renders honest but "not compelling
+  enough yet" (upgrade program continues). One finding: solar storm drew its
+  placeholder circle mid-Atlantic (`_getCenter()` ocean fallback) — fixed:
+  `_renderPlaceholder` now draws nothing when there's no real anchor (no
+  params.center and no centroid); the chat scope disclosure is the content.
+  Candidate #2 (rule #4 intensity audit) also DONE 2026-07-16: wildfire/
+  conflict/generic clean (mag → size/density only); heatwave was the one
+  violation — shimmer + ring intensity was mag/5, now driven by the baked
+  temperature anomaly via a function uniform + intensityRef (mag only seeds
+  the pre-stats value and sizes the footprint).
 
 Next-session candidates, roughly by value:
 1. Manual render pass above, then fix whatever it surfaces.

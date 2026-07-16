@@ -29,8 +29,14 @@ const FLAGSHIP_METROS = [
   // partial metro degrades to the generic render for the missing kind.
   { key: 'houston',     display: 'Houston–Galveston', lon: -95.36, lat: 29.76, matchRadiusDeg: 2.0 },
   { key: 'dhaka',       display: 'Dhaka',         lon: 90.41,  lat: 23.81, matchRadiusDeg: 2.0 },
-  // Enable as bake_geodata.py METROS grows:
-  // norfolk, lagos, shanghai, rotterdam
+  // Wave 3 (2026-07-16). Partial-geodata metros degrade per kind (loaders
+  // resolve missing files to null): norfolk + shanghai have slr_ + hurricane_;
+  // lagos + rotterdam are slr_ only (no defensible TC analog — Gulf of Guinea
+  // sees no landfalls, Rotterdam's risk is extratropical North Sea surge).
+  { key: 'norfolk',     display: 'Norfolk–Hampton Roads', lon: -76.29, lat: 36.85, matchRadiusDeg: 2.0 },
+  { key: 'lagos',       display: 'Lagos',         lon: 3.39,   lat: 6.45,  matchRadiusDeg: 2.0 },
+  { key: 'shanghai',    display: 'Shanghai',      lon: 121.47, lat: 31.23, matchRadiusDeg: 2.0 },
+  { key: 'rotterdam',   display: 'Rotterdam',     lon: 4.48,   lat: 51.92, matchRadiusDeg: 2.0 },
 ];
 
 /** @type {Map<string, Promise<Object|null>>} */

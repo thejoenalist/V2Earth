@@ -831,13 +831,18 @@ export class ActiveSimulation {
     const mag = Math.max(1, Math.min(10, this.command.params?.magnitude ?? 5));
 
     // Burnable-land mask (bake_landmask.py): nudge the fire onto burnable ground
-    // when the parser centroid drifts offshore / onto ice, and clip the burn scar
-    // to it below. Null (bake not run yet) → unclipped centroid behavior.
+    // when the parser centroid drifts offshore / onto ice / into a named desert,
+    // and clip the burn scar to it below. Null (bake not run yet) → unclipped
+    // centroid behavior. 40 rings ≈ 10° ≈ 1,100 km: with named deserts excluded
+    // (2026-07-16) a country centroid can sit deep inside one (Australia →
+    // Outback), so the search must escape a desert complex, not just a bay.
+    // Cost is trivial (ring scan over packed bits) and the nudge is what gives
+    // vegetation-biased placement: the fire moves to the nearest vegetated cell.
     const mask = await loadLandMask();
     if (this._destroyed) return;
     let { lon, lat } = center;
     if (mask) {
-      const b = mask.nearestBurnable(lon, lat, 10);
+      const b = mask.nearestBurnable(lon, lat, 40);
       if (b) { lon = b.lon; lat = b.lat; }
     }
 
@@ -1269,8 +1274,17 @@ export class ActiveSimulation {
   async _renderHeatwave() {
     const { lon, lat } = this._getCenter();
     const mag       = Math.max(1, Math.min(5, this.command.params?.magnitude ?? 3));
-    const intensity = mag / 5;
     const radius    = 300_000 + mag * 100_000;
+
+    // Visual intensity ref — seeded from parser magnitude, then re-driven by
+    // the BAKED temperature anomaly once ImpactStats loads below (the same
+    // rule-#4 tightening as the drought-fill fix, 2026-07-13): shimmer/ring
+    // strength reads as severity, so severity must come from baked data, not
+    // the LLM. mag keeps sizing the footprint (radius) only.
+    // Floor at 0.45: the shimmer's distortion coefficients only become
+    // perceptible around there — a pure anomaly mapping without the floor made
+    // 2025 heatwaves invisible (regression caught on the 2026-07-16 eyeball).
+    const intensityRef = { val: Math.max(0.45, mag / 5) };
 
     // Heat shimmer PostProcessStage (global scene effect)
     const shimmer = this.viewer.scene.postProcessStages.add(
@@ -1304,7 +1318,9 @@ export class ActiveSimulation {
             out_FragColor = color;
           }
         `,
-        uniforms: { intensity },
+        // Function uniform: re-reads the ref each frame, so the strength
+        // switches to the baked-anomaly value as soon as stats load.
+        uniforms: { intensity: () => intensityRef.val },
       })
     );
     this._track(shimmer);
@@ -1373,7 +1389,7 @@ export class ActiveSimulation {
           outlineColor: new Cesium.CallbackProperty(() => {
             const t = ((this._elapsed() * 0.28 + phase) % 1);
             return Cesium.Color.fromCssColorString('#fca5a5')
-              .withAlpha((1 - t) * 0.42 * intensity);
+              .withAlpha((1 - t) * 0.42 * intensityRef.val);
           }, false),
           outlineWidth: 1.5,
           material: new Cesium.ColorMaterialProperty(Cesium.Color.TRANSPARENT),
@@ -1397,6 +1413,19 @@ export class ActiveSimulation {
 
     const anomaly  = stats?.raw?.tempAnomalyC;
     const heatDays = stats?.raw?.heatDaysGt35c;
+
+    // Baked anomaly modulates the visual intensity over a PERCEPTIBLE band:
+    // 0.45 (any heatwave — the effect must announce the event the user chose,
+    // like the hurricane's Cat-N spiral) → 1.0 at ~+4.5 °C (late-century
+    // SSP5-8.5). The severity ORDERING is baked-data-driven (rule #4); the
+    // baseline is scenario framing, not a statistic. A pure anomaly/4 mapping
+    // was tried first and made 2025 heatwaves invisible (2026-07-16 eyeball).
+    // Missing baked data → the mag seed stays (decoration-only fallback,
+    // mirroring the label's own fallback).
+    if (anomaly != null) {
+      intensityRef.val = 0.45 + 0.55 * Math.min(1, Math.max(0, anomaly / 4.5));
+    }
+
     const lines = ['Heatwave'];
     if (anomaly != null) {
       lines[0] = `Heatwave  ${anomaly >= 0 ? '+' : ''}${anomaly.toFixed(1)}°C anomaly (CMIP6 ${this.ssp})`;
@@ -1706,6 +1735,16 @@ export class ActiveSimulation {
   // ═══════════════════════════════════════════════════════════════════════════
 
   async _renderPlaceholder() {
+    // Non-localized event with no resolvable anchor (e.g. solar_storm with no
+    // target): _getCenter() would fall back to a mid-Atlantic point, drawing a
+    // meaningless circle in open ocean and flying the camera to it (seen on the
+    // 2026-07-16 eyeball pass). The chat response already carries the honest
+    // scope disclosure — draw nothing rather than a fake footprint.
+    const p = this.command.params;
+    const hasAnchor = (p?.center?.lon != null && p?.center?.lat != null)
+      || !!getCentroid(this.command.target);
+    if (!hasAnchor) return;
+
     const { lon, lat } = this._getCenter();
     const label = EVENT_TYPES[this.eventType]?.label ?? this.eventType ?? 'Event';
 

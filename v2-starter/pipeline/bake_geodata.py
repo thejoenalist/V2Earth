@@ -119,8 +119,55 @@ METROS = {
             "Copernicus_DSM_COG_10_N29_00_W095_00_DEM",
         ],
     },
-    # Next in priority order (add tiles when enabling):
-    # "norfolk", "dhaka", "lagos", "shanghai", "rotterdam"
+    # Wave 3 (2026-07-16): norfolk/lagos/shanghai/rotterdam. lagos + rotterdam
+    # are SLR-only (no TC analog in bake_tracks — Gulf of Guinea / North Sea);
+    # dhaka stays DEM-less on purpose (Ganges-delta bathtub needs its own
+    # honesty pass — see bake_tracks REGISTRY note).
+    "norfolk": {
+        "display": "Norfolk–Hampton Roads",
+        # Elizabeth River + Hampton Roads (Norfolk, Portsmouth, Hampton) — the
+        # surge-critical geography for the Isabel analog. Virginia Beach's
+        # oceanfront (east of 76.05°W) is outside to stay in the W077 tiles.
+        "bbox": (-76.55, 36.70, -76.05, 37.05),
+        "center": {"lon": -76.29, "lat": 36.85},
+        "tiles": [
+            "Copernicus_DSM_COG_10_N36_00_W077_00_DEM",
+            "Copernicus_DSM_COG_10_N37_00_W077_00_DEM",
+        ],
+    },
+    "lagos": {
+        "display": "Lagos",
+        # Lagos Island, Victoria Island, Lekki barrier coast + lagoon rim —
+        # all within the single N06/E003 tile.
+        "bbox": (3.10, 6.35, 3.70, 6.65),
+        "center": {"lon": 3.39, "lat": 6.45},
+        "tiles": [
+            "Copernicus_DSM_COG_10_N06_00_E003_00_DEM",
+        ],
+    },
+    "shanghai": {
+        "display": "Shanghai",
+        # Huangpu bend + Pudong out to the airport; lat_min held at 31.00 to
+        # stay inside the single N31/E121 tile.
+        "bbox": (121.20, 31.00, 121.90, 31.45),
+        "center": {"lon": 121.47, "lat": 31.23},
+        "tiles": [
+            "Copernicus_DSM_COG_10_N31_00_E121_00_DEM",
+        ],
+    },
+    "rotterdam": {
+        "display": "Rotterdam",
+        # City + port toward Hoek van Holland, single N51/E004 tile. NOTE:
+        # much of the metro sits BELOW sea level behind the Delta Works — the
+        # bathtub's "ignores levees/pumps" caveat is doing maximum work here
+        # (same class as New Orleans, more extreme). The baked area_km2 is the
+        # honest bathtub number; the render's existing caveat line covers it.
+        "bbox": (4.00, 51.80, 4.60, 51.99),
+        "center": {"lon": 4.48, "lat": 51.92},
+        "tiles": [
+            "Copernicus_DSM_COG_10_N51_00_E004_00_DEM",
+        ],
+    },
 }
 
 CAVEATS = [

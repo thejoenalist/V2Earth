@@ -9,8 +9,11 @@
  * Missing file (bake not run yet) → loadLandMask() resolves to null and the
  * render keeps its unclipped centroid behavior — never throws.
  *
- * Honest scope: land vs water + ice only. Deserts are NOT excluded (see the
- * bake's _meta.note). Coarse grid → block-level, not parcel-level.
+ * Honest scope: land vs water + ice, minus major NAMED deserts (NE 1:10m
+ * geography regions — added 2026-07-16; a pre-desert bake degrades gracefully,
+ * see _meta.desert_excluded). Unnamed barren/urban land is still burnable —
+ * MODIS / ESA WorldCover remains the fuller follow-up. Coarse grid →
+ * block-level, not parcel-level.
  */
 
 /** @type {Promise<LandMask|null>|null} */

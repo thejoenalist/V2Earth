@@ -79,6 +79,28 @@ REGISTRY = {
         "sid": "2007314N10093", "name": "Sidr", "year": 2007,
         "metro_lon": 90.41, "metro_lat": 23.81,
     },
+    # Wave 3 (2026-07-16). lagos + rotterdam are intentionally absent, like
+    # Jakarta: Gulf of Guinea sees no TC landfalls (too near the equator) and
+    # Rotterdam's flood risk is extratropical North Sea surge (the 1953 storm
+    # isn't in IBTrACS) — an analog would be dishonest for both. They get SLR
+    # geodata only (bake_geodata.METROS).
+    "norfolk": {
+        # Isabel (2003) — the canonical Hampton Roads surge event; made
+        # landfall on the NC Outer Banks and drove record surge up the
+        # Chesapeake into the Elizabeth River.
+        "display": "Norfolk–Hampton Roads", "basin": "NA",
+        "sid": "2003249N12341", "name": "Isabel", "year": 2003,
+        "metro_lon": -76.29, "metro_lat": 36.85,
+    },
+    "shanghai": {
+        # In-fa (2021) — landfall Zhoushan then Pinghu, the closest direct
+        # modern hit on the Shanghai metro. First WP-basin entry. SID is a
+        # best-effort hint; NOTE the name+season fallback must match IBTrACS's
+        # name spelling ("IN-FA" — hyphen retained) — watch the bake log.
+        "display": "Shanghai", "basin": "WP",
+        "sid": "2021196N19124", "name": "In-fa", "year": 2021,
+        "metro_lon": 121.47, "metro_lat": 31.23,
+    },
 }
 
 SYNOPTIC_HOURS = {0, 6, 12, 18}  # 6-hourly cadence keeps files small

@@ -36,7 +36,7 @@ FETCHERS = [
     # After bake_tracks.py: city elevation reuses the warm .dem_cache tiles.
     ("bake_city_elevation.py", "City mean_elev_m from DEM (flagship metro coverage)"),
     ("bake_admin1.py", "Admin-1 boundaries for drought choropleth (Natural Earth 10m, global)"),
-    ("bake_landmask.py", "Burnable land+ice mask for wildfire (Natural Earth 50m)"),
+    ("bake_landmask.py", "Burnable land mask for wildfire (NE 50m land−ice, 10m named deserts excluded)"),
     ("build_attribution.py", "Data source attribution (CC BY 4.0)"),
 ]
 

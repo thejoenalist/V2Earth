@@ -1,5 +1,5 @@
 {
-  "validated_at": "2026-07-16T12:00:01.738910+00:00",
+  "validated_at": "2026-07-16T15:05:55.413437+00:00",
   "passed": true,
   "results": {
     "climate": "PASS",
@@ -11,9 +11,7 @@
     "geodata": "PASS"
   },
   "error_count": 0,
-  "warning_count": 1,
+  "warning_count": 0,
   "errors": [],
-  "warnings": [
-    "cities.json: only 38 cities carry mean_elev_m \u2014 run bake_city_elevation.py (CI 'elevation' dispatch) so the SLR close-up can pick the true low point"
-  ]
+  "warnings": []
 }

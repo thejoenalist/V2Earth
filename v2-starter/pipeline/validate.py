@@ -448,6 +448,20 @@ def _validate_landmask_file(path: Path, errors: list, warnings: list) -> None:
     need = math.ceil(w * h / 8)
     if len(raw) < need:
         errors.append(f"{tag}: packed bytes {len(raw)} < ceil(w*h/8)={need}")
+        return
+
+    # Plausibility: burnable fraction of the globe. Land is ~29%; minus ice,
+    # Antarctica and named deserts the expected band is roughly 15–27%. Far
+    # outside that suggests a broken rasterization (e.g. desert featurecla
+    # drift excluding everything, or an inverted mask) — warn, don't fail.
+    ones = sum(bin(b).count("1") for b in raw[:need])
+    frac = ones / (w * h)
+    if not (0.08 <= frac <= 0.35):
+        warnings.append(f"{tag}: burnable fraction {frac:.1%} outside the "
+                        f"plausible 8–35% band — check the bake log")
+    if data.get("_meta", {}).get("desert_excluded") is False:
+        warnings.append(f"{tag}: baked WITHOUT desert exclusion (desert source "
+                        f"unavailable that run) — re-run the landmask dispatch")
 
 
 def validate_cities(errors: list, warnings: list) -> bool:
