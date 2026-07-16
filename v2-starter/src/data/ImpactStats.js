@@ -123,6 +123,32 @@ function nearestCities(cities, center, { coastalOnly = false, k = 3, maxKm = 120
   return scored.slice(0, k);
 }
 
+/**
+ * Most populous baked city in a country. Used by renders that need a
+ * population-biased anchor for country-level queries (wildfire, decision
+ * 2026-07-16): the anchor comes from baked cities.json (rule #4), never the
+ * LLM. Null when the ISO is unknown or the country has no baked city.
+ *
+ * @param {string|null|undefined} iso
+ * @returns {Promise<{name:string, lon:number, lat:number, population:number}|null>}
+ */
+export async function largestCityForISO(iso) {
+  const a3 = normalizeISO(iso);
+  if (!a3) return null;
+  let data;
+  try { data = await loadImpactData(); } catch { return null; }
+  let best = null;
+  for (const c of data.cities) {
+    if (normalizeISO(c.iso) !== a3) continue;
+    if (!Number.isFinite(c.lon) || !Number.isFinite(c.lat)) continue;
+    const pop = Number(c.population) || 0;
+    if (!best || pop > best.population) {
+      best = { name: c.name, lon: c.lon, lat: c.lat, population: pop };
+    }
+  }
+  return best;
+}
+
 // ── Source tags ─────────────────────────────────────────────────────────────
 
 const climateSource = (ssp) => `CMIP6 ${ssp || 'SSP2-4.5'}`;

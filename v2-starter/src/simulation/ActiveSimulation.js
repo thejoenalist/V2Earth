@@ -14,7 +14,7 @@
 import { EVENT_TYPES } from '../chat/SimulationCommand.js';
 import { EventBus } from '../core/EventBus.js';
 import { getCentroid } from '../globe/RegionCentroids.js';
-import { getImpactStats, fmtCount } from '../data/ImpactStats.js';
+import { getImpactStats, fmtCount, largestCityForISO } from '../data/ImpactStats.js';
 import { getCountryFeature, featureToPolygonRings } from '../data/CountryGeometry.js';
 import { loadAdmin1, regionToPolygonRings } from './Admin1Geodata.js';
 import { loadLandMask } from './LandMaskGeodata.js';
@@ -841,6 +841,24 @@ export class ActiveSimulation {
     const mask = await loadLandMask();
     if (this._destroyed) return;
     let { lon, lat } = center;
+
+    // Population-biased anchor for COUNTRY-LEVEL queries (decision locked
+    // 2026-07-16, from the Australia eyeball): with no explicit place from the
+    // parser, the geometric centroid can sit in remote interior (the Alice
+    // Springs corridor — a genuine gap between NE named deserts), reading as
+    // fire-on-sand 1,100+ km from anyone. Anchoring at the most populous baked
+    // city puts "wildfire in Australia" in the populated fire country people
+    // mean, and the city callout becomes meaningful. Baked cities.json only
+    // (rule #4); explicit-center queries keep the parser's placement.
+    let cityBiased = false;
+    const hasExplicitCenter =
+      this.command.params?.center?.lon != null && this.command.params?.center?.lat != null;
+    if (!hasExplicitCenter) {
+      const big = await largestCityForISO(this.command.target);
+      if (this._destroyed) return;
+      if (big) { lon = big.lon; lat = big.lat; cityBiased = true; }
+    }
+
     if (mask) {
       const b = mask.nearestBurnable(lon, lat, 40);
       if (b) { lon = b.lon; lat = b.lat; }
@@ -973,6 +991,11 @@ export class ActiveSimulation {
     const anchorCity = stats?.nearestCities?.[0];
     if (anchorCity) {
       lines.push(`${anchorCity.name} — ${fmtCount(anchorCity.population)} people`);
+    }
+    // Honest framing when we chose the spot (country-level query): the fire's
+    // location is illustrative, not a modeled ignition point.
+    if (cityBiased) {
+      lines.push('illustrative placement — country-level query');
     }
 
     this._addStatLabel(lon, lat + fireR / 111_000 + 1.5, lines.join('\n'), '#ffa040');
