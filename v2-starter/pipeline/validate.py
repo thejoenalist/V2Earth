@@ -492,10 +492,17 @@ def validate_cities(errors: list, warnings: list) -> bool:
             else:
                 n_elev += 1
 
-    if n_elev < 50:
-        warnings.append(f"cities.json: only {n_elev} cities carry mean_elev_m — "
-                        f"run bake_city_elevation.py (CI 'elevation' dispatch) so "
-                        f"the SLR close-up can pick the true low point")
+    # Elevation enrichment check. Coverage is DESIGNED to be flagship-scoped
+    # (~38 cities total after the 2026-07-14 'elevation' dispatch), so don't
+    # warn on the count — warn on the actual symptom: a flagship SLR anchor
+    # without mean_elev_m (breaks the close-up's low-point pick).
+    slr_anchors = ["Miami", "New Orleans", "Jakarta", "Houston"]
+    no_elev = [c.get("name") for c in cities
+               if c.get("name") in slr_anchors and c.get("mean_elev_m") is None]
+    if no_elev or n_elev < 20:
+        warnings.append(f"cities.json: elevation enrichment incomplete "
+                        f"(anchors missing mean_elev_m: {no_elev or 'none'}; "
+                        f"{n_elev} cities total) — run the CI 'elevation' dispatch")
 
     # Flagship anchors must exist for the metro city callouts. The 2026-07-13
     # weekly cron regenerated cities.json from GeoNames (city-proper ranking)

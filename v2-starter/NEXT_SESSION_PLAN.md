@@ -1,5 +1,39 @@
 # Next Session Plan — Earth Simulator V2
 
+## SESSION CLOSE-OUT 2026-07-14 — read this block first
+
+Everything below this block is DONE and verified in CI. State at close:
+
+- **All three dispatches ran + landed on main** (geodata → tracks → elevation,
+  serialized): `slr_houston.json` (5th SLR flagship), `hurricane_houston.json`
+  (Ike + Galveston surge), `hurricane_dhaka.json` (Sidr, track-only, NI basin),
+  and `cities.json` elevation-enriched (Miami mean_elev_m 3.3 — was null; 38
+  cities total, flagship-scoped by design). Registry SIDs for Ike/Sidr were
+  exact (no name+season fallback needed).
+- **Cron regression found + permanently fixed:** the 2026-07-13 weekly run
+  regenerated cities.json from GeoNames (city-proper ranking) and silently
+  dropped Miami + the hand-authored coastal flags. fetch_cities.py is now
+  Natural-Earth-first (GeoNames explicit fallback); validate.py has a
+  flagship-anchor tripwire; dataset regenerated + coastal flags restored.
+- **Still owed (ONLY remaining item from this plan):** the manual render
+  eyeball pass — `VERIFY_CHECKLIST_2026-07-14.md` §2 + §4.
+
+Next-session candidates, roughly by value:
+1. Manual render pass above, then fix whatever it surfaces.
+2. Rule #4 visual-intensity audit (flagged 2026-07-13): heatwave/wildfire/
+   conflict may still scale visual *intensity* from parser magnitude (drought's
+   fill was fixed) — decoration, not stats, but worth one pass.
+3. Wildfire fuller version: MODIS/ESA WorldCover land-cover (desert exclusion +
+   vegetation-biased placement) — fixes the Outback-fire-on-sand eyeball.
+4. More flagship metros (norfolk, lagos, shanghai, rotterdam) — the whole chain
+   (SLR + hurricane + elevation) is now just registry entries.
+5. Launch-blocker remainders: legal review of privacy/terms copy; Anthropic
+   console spend cap. Plus bug #13 (sparse-data disclosure UI, low priority).
+6. Deferred with written rationale: SLOSH-MOM (HURRICANE_TRACKS_PLAN.md),
+   conflict named-place arcs, sub-national CMIP6 for the drought choropleth.
+
+---
+
 Written 2026-07-12, end of the per-event render session. Ordering refined with the
 user; **Phase B (depth: admin-1 + land-cover) is the chosen priority** after the
 Phase A quick wins.
