@@ -72,10 +72,23 @@ def _geoms(fc: dict):
 
 
 def _desert_geoms(fc: dict):
-    """Named desert polygons only (featurecla == 'Desert')."""
+    """Named desert polygons only (featurecla == 'Desert').
+
+    NOTE: the geography-regions geojson uses UPPERCASE property keys
+    (FEATURECLA/NAME), unlike ne_50m_land etc. The first CI bake (2026-07-16,
+    run 29509684304) read the lowercase key, matched 0 features and degraded
+    to land−ice — so keys are matched case-insensitively now. Verified against
+    the real file: 58 Desert features incl. Sahara, Gobi, Kalahari, Taklimakan
+    and all the Australian Outback deserts.
+    """
     for feat in fc.get("features", []):
         g = feat.get("geometry")
-        cla = str(feat.get("properties", {}).get("featurecla", "")).strip().lower()
+        props = feat.get("properties") or {}
+        cla = ""
+        for k, v in props.items():
+            if str(k).lower() == "featurecla":
+                cla = str(v or "").strip().lower()
+                break
         if g and cla == "desert":
             yield (g, 1)
 
