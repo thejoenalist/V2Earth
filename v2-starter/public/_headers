@@ -1,5 +1,5 @@
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.arcgisonline.com https://*.nasa.gov https://*.cesium.com; connect-src 'self' https://api.anthropic.com https://*.supabase.co https://*.cesium.com https://*.arcgisonline.com https://gibs.earthdata.nasa.gov; worker-src blob:; frame-src 'self' blob: about:; object-src 'none';
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.arcgisonline.com https://*.nasa.gov https://*.cesium.com; connect-src 'self' https://api.anthropic.com https://*.supabase.co https://*.cesium.com https://*.arcgisonline.com https://gibs.earthdata.nasa.gov; worker-src blob:; frame-src 'self' blob: about:; object-src 'none';
   X-Frame-Options: DENY
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
