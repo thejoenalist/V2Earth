@@ -29,12 +29,8 @@ const STORAGE_KEY = 'earthsim.telemetryConsent';
 // BUMP THIS whenever privacy.html changes materially, together with its
 // "Last updated" date. Still the one approved localStorage flag (DECISIONS.md
 // amendment) — same key, single value, no personal content.
-const CONSENT_VERSION = '2026-07-05';
+const CONSENT_VERSION = '2026-07-31';
 const ACCEPTED = `accepted:${CONSENT_VERSION}`;
-// Pre-versioning value written between 2026-07-05 and 2026-07-16 — the policy
-// text is unchanged since then, so legacy consent remains valid for this
-// version (and is upgraded in place on load).
-const ACCEPTED_LEGACY = 'accepted';
 
 /** @type {boolean | null} null = undecided, true = accepted, false = declined (session-only) */
 let _granted = null;
@@ -60,12 +56,9 @@ function _persistAccept() {
   const stored = _read();
   if (stored === ACCEPTED) {
     _granted = true;
-  } else if (stored === ACCEPTED_LEGACY) {
-    _granted = true;
-    _persistAccept(); // upgrade the legacy value to the versioned form
   }
-  // Any other value (older CONSENT_VERSION after a bump, or garbage) counts
-  // as undecided → the banner asks again before any collection.
+  // Older accepted:<date>, bare "accepted", or garbage → undecided; banner
+  // re-asks (material privacy.html bump 2026-07-31 named the Contact channel).
 }
 
 /** @returns {boolean | null} true = accepted, false = declined, null = undecided */
