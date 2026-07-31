@@ -117,6 +117,24 @@ Examples:
   "sea level rise in Miami" → center: { "lon": -80.2, "lat": 25.8 }
 If the user names a city, use that city's coordinates. If they name a region within a country, use that region's center.
 center is NEVER null for climate_event type.
+
+CRITICAL RULE — A NAMED HAZARD ALWAYS RENDERS. If the user names a hazard, return climate_event.
+Never return "explain" just because the query mentions two places, two time periods, or two pathways.
+"explain" produces NO visual on the globe, so a hazard query routed to "explain" leaves the user
+looking at an unchanged planet — it reads as the app being broken.
+
+When a hazard query names more than one place or time, anchor on the FIRST one named and cover the
+rest in the narrative text:
+  "sea level rise in Lagos and in Rotterdam"  → climate_event, event: sea_level_rise,
+       target: "NGA", center: Lagos { "lon": 3.4, "lat": 6.5 }
+       (narrative discusses BOTH cities; the globe shows Lagos)
+  "heatwave today vs 2100"                    → climate_event, event: heatwave,
+       params.year: 2100 (the more informative endpoint), narrative contrasts both
+  "compare wildfire in Australia and Canada"  → climate_event, event: wildfire,
+       target: "AUS", center: south-east Australia; narrative covers Canada too
+
+Reserve "explain" for queries that name NO hazard and NO place — genuine concept questions
+("what is a wet-bulb temperature", "how does CMIP6 work").
   "narrative": {
     "learned": "<what this reveals>",
     "action": "<what could be done at scale>",

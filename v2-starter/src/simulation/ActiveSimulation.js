@@ -37,6 +37,21 @@ export const SIMULATION_LIFETIME_MS = 180_000; // 3 minutes on the globe
  */
 export const SIMULATION_DECISION_GRACE_MS = 60_000; // 1 minute to decide
 
+/**
+ * Dark plate drawn behind on-globe text.
+ *
+ * A 2 px black outline is not enough on a bright render: on the 2026-07-31
+ * eyeball pass the hurricane cloud deck washed the analog and surge labels out
+ * completely, and fading the deck alone did not recover them (thirteen
+ * translucent layers still composite to a hazy plate). Spread this into any
+ * label that must stay readable over cloud, surge polygons, ice or desert.
+ */
+const LABEL_PLATE = {
+  showBackground: true,
+  backgroundColor: Cesium.Color.fromCssColorString('#0b1220').withAlpha(0.62),
+  backgroundPadding: new Cesium.Cartesian2(8, 5),
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Canvas helpers for particle textures
 // ─────────────────────────────────────────────────────────────────────────────
@@ -84,6 +99,8 @@ export class ActiveSimulation {
     this._destroyed = false;
     this._animStart = null;
     this._lifetimeTimer = null;
+    /** Pinned-scenario notice entity, created only on drift (finding D) */
+    this._pinLabel  = null;
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -96,6 +113,8 @@ export class ActiveSimulation {
     const meta     = this.eventType ? EVENT_TYPES[this.eventType] : null;
     const strategy = meta?.render ?? 'placeholder';
     await this._dispatch(strategy);
+    if (this._destroyed) return;
+    this._startScenarioPinWatch();
 
     // Natural end: after the lifetime elapses, ask the user whether to keep the
     // scenario up or clear it (ChatInterface renders the prompt + runs the grace
@@ -159,6 +178,66 @@ export class ActiveSimulation {
     this.viewer.scene.postRender.addEventListener(fn);
   }
 
+  /**
+   * Finding D (2026-07-31 eyeball pass) — "pin and say so".
+   *
+   * A simulation snapshots `year` and `ssp` at construction (EventSimulator
+   * passes TimeController's values) and deliberately does NOT re-render when
+   * they change: it is the scenario the user asked for, and restarting it
+   * mid-view would be worse than leaving it. But the CountryPanel and the chat
+   * card DO follow TimeController, so after an SSP toggle — or the two
+   * `setSSP` calls inside a `scenario_compare` sweep — the same quantity can
+   * appear twice on one screen under two pathways (seen on Lagos: the globe
+   * read +0.63 m SSP5-8.5 while the panel read +0.44 m SSP2-4.5).
+   *
+   * Both numbers are baked and each is already tagged, so nothing is
+   * fabricated — the gap just looks like a bug. This says out loud that the
+   * scenario is pinned, and clears the notice if the timeline returns to it.
+   */
+  _startScenarioPinWatch() {
+    const onChange = (payload) => {
+      if (this._destroyed) return;
+      const nowSsp  = payload?.ssp  ?? this.ssp;
+      const nowYear = payload?.year ?? this.year;
+      this._setScenarioPin(nowSsp !== this.ssp || nowYear !== this.year);
+    };
+    EventBus.on('time:changed', onChange);
+    EventBus.on('ssp:changed', onChange);
+    // Reuses the existing removal-closure contract, so destroy() unsubscribes.
+    this._listeners.push(() => {
+      EventBus.off('time:changed', onChange);
+      EventBus.off('ssp:changed', onChange);
+    });
+  }
+
+  /** Show/hide the pinned-scenario notice. Idempotent. */
+  _setScenarioPin(drifted) {
+    if (drifted && !this._pinLabel) {
+      const { lon, lat } = this._getCenter();
+      this._pinLabel = this._track(this.viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(lon, lat),
+        label: {
+          text: `📌 pinned to the scenario you asked for — ${this.ssp} · ${this.year}`
+            + '\nthe side panel follows the timeline',
+          font: 'bold 12px system-ui',
+          fillColor: Cesium.Color.fromCssColorString('#fde68a'),
+          outlineColor: Cesium.Color.BLACK,
+          outlineWidth: 2,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          verticalOrigin: Cesium.VerticalOrigin.TOP,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          pixelOffset: new Cesium.Cartesian2(0, 34),
+          ...LABEL_PLATE,
+        },
+      }));
+    } else if (!drifted && this._pinLabel) {
+      this.viewer.entities.remove(this._pinLabel);
+      this._owned = this._owned.filter((o) => o !== this._pinLabel);
+      this._pinLabel = null;
+    }
+    this.viewer.scene.requestRender();
+  }
+
   /** Elapsed seconds since simulation started */
   _elapsed() {
     return (Date.now() - this._animStart) / 1000;
@@ -214,6 +293,26 @@ export class ActiveSimulation {
     const eyeR   = stormR * 0.045;
     const eyeWallR = stormR * 0.09;
 
+    // ── Close-range legibility (2026-07-31 eyeball finding A) ────────────
+    // The cloud deck is white and ground-anchored, so at the altitude where the
+    // surge polygons, analog track and baked stat labels live it filled the
+    // frame and washed all of them out (seen on Norfolk and Shanghai). Fade the
+    // whole deck as the camera descends: from orbit it still reads as a
+    // hurricane; up close the baked geometry underneath stays readable. This is
+    // presentation only — no displayed number changes (rule #4).
+    const CLOUD_FADE_FAR  = stormR * 3.0;   // fully opaque at/above this height
+    const CLOUD_FADE_NEAR = stormR * 0.9;   // floor opacity at/below it
+    // 0.05, not 0.12: thirteen cloud entities overlap, so the per-layer floor
+    // composites to roughly ten times itself where the deck is densest.
+    const CLOUD_MIN_ALPHA = 0.05;
+    const cloudFade = { val: 1 };
+    /** Camera-faded cloud material. baseAlpha is the orbit-distance opacity. */
+    const cloudMaterial = (css, baseAlpha) => new Cesium.ColorMaterialProperty(
+      new Cesium.CallbackProperty(
+        () => Cesium.Color.fromCssColorString(css)
+          .withAlpha(baseAlpha * cloudFade.val),
+        false));
+
     // ── Eye (calm dark oval) ─────────────────────────────────────────────
     this._track(this.viewer.entities.add({
       position: Cesium.Cartesian3.fromDegrees(lon, lat),
@@ -233,8 +332,7 @@ export class ActiveSimulation {
         semiMajorAxis: eyeWallR,
         semiMinorAxis: eyeWallR * 0.85,
         height: 2000,
-        material: new Cesium.ColorMaterialProperty(
-          Cesium.Color.WHITE.withAlpha(0.75)),
+        material: cloudMaterial('#ffffff', 0.75),
       },
     }));
 
@@ -272,8 +370,7 @@ export class ActiveSimulation {
               () => Cesium.Math.toRadians(rotRef.val), false),
             stRotation: new Cesium.CallbackProperty(
               () => Cesium.Math.toRadians(rotRef.val), false),
-            material: new Cesium.ColorMaterialProperty(
-              Cesium.Color.WHITE.withAlpha(layer.alpha)),
+            material: cloudMaterial('#ffffff', layer.alpha),
           },
         }));
       }
@@ -286,8 +383,7 @@ export class ActiveSimulation {
         semiMajorAxis: stormR * 0.20,
         semiMinorAxis: stormR * 0.18,
         height: 2500,
-        material: new Cesium.ColorMaterialProperty(
-          Cesium.Color.WHITE.withAlpha(0.70)),
+        material: cloudMaterial('#ffffff', 0.70),
       },
     }));
 
@@ -298,8 +394,7 @@ export class ActiveSimulation {
         semiMajorAxis: stormR * 1.35,
         semiMinorAxis: stormR * 1.15,
         height: 500,
-        material: new Cesium.ColorMaterialProperty(
-          Cesium.Color.fromCssColorString('#c8e8ff').withAlpha(0.09)),
+        material: cloudMaterial('#c8e8ff', 0.09),
       },
     }));
 
@@ -313,6 +408,7 @@ export class ActiveSimulation {
         fillColor: Cesium.Color.fromCssColorString('#cce8ff'),
         outlineColor: Cesium.Color.BLACK,
         outlineWidth: 2,
+        ...LABEL_PLATE,
         style: Cesium.LabelStyle.FILL_AND_OUTLINE,
         verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
@@ -353,6 +449,7 @@ export class ActiveSimulation {
           fillColor: Cesium.Color.fromCssColorString('#cce8ff'),
           outlineColor: Cesium.Color.BLACK,
           outlineWidth: 2,
+          ...LABEL_PLATE,
           style: Cesium.LabelStyle.FILL_AND_OUTLINE,
           verticalOrigin: Cesium.VerticalOrigin.TOP,
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
@@ -376,6 +473,12 @@ export class ActiveSimulation {
           rotRefs[li][ai].val += LAYERS[li].speed * dt * 60;
         }
       }
+      // Camera-distance cloud fade (finding A). Rides on this existing
+      // listener — no second postRender listener (the 2026-07-12 perf note).
+      const h = this.viewer.camera.positionCartographic?.height ?? CLOUD_FADE_FAR;
+      const t = Math.max(0, Math.min(1,
+        (h - CLOUD_FADE_NEAR) / (CLOUD_FADE_FAR - CLOUD_FADE_NEAR)));
+      cloudFade.val = CLOUD_MIN_ALPHA + (1 - CLOUD_MIN_ALPHA) * t;
       this.viewer.scene.requestRender();
     });
 
@@ -437,10 +540,11 @@ export class ActiveSimulation {
         position: Cesium.Cartesian3.fromDegrees(lf.lon, lf.lat),
         label: {
           text: `${a.name} (${a.year}) — Cat ${a.peak_category} peak\nhistorical analog — not a forecast`,
-          font: '11px system-ui',
+          font: 'bold 12px system-ui',
           fillColor: Cesium.Color.fromCssColorString('#fed7aa'),
           outlineColor: Cesium.Color.BLACK,
           outlineWidth: 2,
+          ...LABEL_PLATE,
           style: Cesium.LabelStyle.FILL_AND_OUTLINE,
           verticalOrigin: Cesium.VerticalOrigin.TOP,
           pixelOffset: new Cesium.Cartesian2(0, 10),
@@ -512,10 +616,11 @@ export class ActiveSimulation {
         label: {
           text: `Storm surge — ~${surge.height_m} m (category-typical, bathtub)`
             + `\n${surge.area_km2} km² inundated`,
-          font: '11px system-ui',
+          font: 'bold 12px system-ui',
           fillColor: Cesium.Color.fromCssColorString('#bae6fd'),
           outlineColor: Cesium.Color.BLACK,
           outlineWidth: 2,
+          ...LABEL_PLATE,
           style: Cesium.LabelStyle.FILL_AND_OUTLINE,
           verticalOrigin: Cesium.VerticalOrigin.TOP,
           pixelOffset: new Cesium.Cartesian2(0, 8),
@@ -549,6 +654,7 @@ export class ActiveSimulation {
         style: Cesium.LabelStyle.FILL_AND_OUTLINE,
         verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        ...LABEL_PLATE,
       },
     }));
   }
@@ -1758,11 +1864,23 @@ export class ActiveSimulation {
   // ═══════════════════════════════════════════════════════════════════════════
 
   async _renderPlaceholder() {
-    // Non-localized event with no resolvable anchor (e.g. solar_storm with no
-    // target): _getCenter() would fall back to a mid-Atlantic point, drawing a
-    // meaningless circle in open ocean and flying the camera to it (seen on the
-    // 2026-07-16 eyeball pass). The chat response already carries the honest
-    // scope disclosure — draw nothing rather than a fake footprint.
+    // Draw nothing rather than a fake footprint. Two ways that applies:
+    //
+    // 1. Planet-wide events (`non_climate`, e.g. solar_storm) have no localized
+    //    footprint AT ALL, so a circle anywhere is a fabricated claim about
+    //    where the event is. The 2026-07-16 fix only tested whether an anchor
+    //    existed, which let this through: on the 2026-07-31 pass the parser
+    //    invented a center in the Gulf of Guinea (the "Nearest: Accra 618 km ·
+    //    Lomé · Abidjan" readout is essentially null island) and a 250 km
+    //    circle drew in open ocean. Scope decides, not anchor presence.
+    // 2. Any event with no resolvable anchor at all — _getCenter() would fall
+    //    back to its mid-Atlantic constant and fly the camera to open ocean.
+    //
+    // In both cases the chat response already carries the honest scope
+    // disclosure, which is the actual content (rule #4: never let the parser
+    // assert a location the data does not support).
+    if (EVENT_TYPES[this.eventType]?.status === 'non_climate') return;
+
     const p = this.command.params;
     const hasAnchor = (p?.center?.lon != null && p?.center?.lat != null)
       || !!getCentroid(this.command.target);
