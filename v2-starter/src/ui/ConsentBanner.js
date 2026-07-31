@@ -7,6 +7,10 @@
  *   - Decline → setConsent(false): session-only; the app works normally,
  *     telemetry stays off, and the banner reappears next visit.
  *
+ * Deliberately deferred until after the onboarding overlay is dismissed
+ * (see revealIfNeeded). The banner's z-index sits above onboarding, so
+ * showing it early covered the "Explore the Earth" button and trapped users.
+ *
  * The choice is recorded through ConsentState, which emits consent:changed on
  * the EventBus — TelemetryService reacts there; this module never touches
  * telemetry directly.
@@ -26,7 +30,12 @@ export class ConsentBanner {
     this._onDecline = () => this._choose(false);
     this._acceptBtn?.addEventListener('click', this._onAccept);
     this._declineBtn?.addEventListener('click', this._onDecline);
+    // Do not auto-show here — wait for revealIfNeeded() after onboarding.
+  }
 
+  /** Show the banner once onboarding is gone, if consent is still undecided. */
+  revealIfNeeded() {
+    if (!this._banner) return;
     if (getConsent() === null) {
       this._banner.classList.add('visible');
     }

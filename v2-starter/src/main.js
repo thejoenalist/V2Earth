@@ -94,13 +94,15 @@ wireSSPToggle();
 updateActiveChapter(timeController.year);
 
 // Consent banner + attribution modal — pure UI, no globe dependency.
-// The banner must exist before TelemetryService starts logging so the
-// pre-consent buffer/drop semantics apply from the first event.
-new ConsentBanner();
+// ConsentBanner is constructed early so its wiring exists before
+// TelemetryService starts buffering, but the banner itself only appears
+// after onboarding is dismissed (otherwise it covers Explore the Earth).
+const consentBanner = new ConsentBanner();
 new AttributionModal();
 
 document.getElementById('onboarding-start')?.addEventListener('click', () => {
   document.getElementById('onboarding')?.classList.add('hidden');
+  consentBanner.revealIfNeeded();
 });
 
 // ── Async boot — waits for terrain before creating Viewer ────────────────────
