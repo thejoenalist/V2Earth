@@ -97,13 +97,19 @@ updateActiveChapter(timeController.year);
 // ConsentBanner is constructed early so its wiring exists before
 // TelemetryService starts buffering, but the banner itself only appears
 // after onboarding is dismissed (otherwise it covers Explore the Earth).
+// Onboarding dismiss itself is handled by public/onboarding-boot.js so the
+// button works before this Cesium-heavy module finishes loading.
 const consentBanner = new ConsentBanner();
 new AttributionModal();
 
-document.getElementById('onboarding-start')?.addEventListener('click', () => {
-  document.getElementById('onboarding')?.classList.add('hidden');
+function revealConsentAfterOnboarding() {
   consentBanner.revealIfNeeded();
-});
+}
+document.addEventListener('earthsim:onboarding-done', revealConsentAfterOnboarding);
+// If the user clicked Explore before this module evaluated, catch up.
+if (document.getElementById('onboarding')?.classList.contains('hidden')) {
+  revealConsentAfterOnboarding();
+}
 
 // ── Async boot — waits for terrain before creating Viewer ────────────────────
 (async () => {

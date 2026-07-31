@@ -769,7 +769,7 @@
   <div id="onboarding">
     <h1>See where the Earth is headed.</h1>
     <p>Explore real climate projections, economic shifts, and cascading crises — from today to 2100.</p>
-    <button id="onboarding-start">Explore the Earth</button>
+    <button type="button" id="onboarding-start">Explore the Earth</button>
   </div>
 
   <!-- Telemetry consent banner (wired by ConsentBanner.js) -->
@@ -805,6 +805,9 @@
     <div id="attribution-modal"></div>
   </div>
 
+  <!-- Classic script (not a module): wires Explore immediately, before Cesium loads.
+       CSP script-src is 'self' only — keep this as an external file, not inline. -->
+  <script src="/onboarding-boot.js"></script>
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>
