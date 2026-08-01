@@ -17,3 +17,9 @@ v2-starter/pipeline/.dem_cache/
 .supabase/
 supabase/.temp/
 **/supabase/.temp/
+
+# Working-session artefacts — verification screenshots and pasted prompts.
+# Not project files; `git add -A` swept ~4 MB of them into 20cc949 before this
+# was added. Findings worth keeping belong in the VERIFY_CHECKLIST_*.md files.
+Screenshots Eye Ball Test/
+last prompt/

@@ -4,6 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Earth Simulator</title>
+  <!-- Declaring an icon stops the browser's implicit /favicon.ico request, which
+       was the only console error on an otherwise clean load (2026-07-31) and
+       made "the console is clean" an ambiguous check. -->
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -778,8 +782,9 @@
     <div class="consent-body">
       With your permission, we record what you explore and ask in this session —
       including the full text of your chat messages — and store it remotely so we
-      can improve the simulator. Nothing is saved on your device between visits,
-      and you can use everything with telemetry off.
+      can improve the simulator. Your chat history is never saved between visits;
+      the only thing kept on your device is your answer to this question. You can
+      use everything with telemetry off.
       See our <a href="/privacy.html" target="_blank" rel="noopener">Privacy Policy</a>
       and <a href="/terms.html" target="_blank" rel="noopener">Terms of Service</a>.
     </div>

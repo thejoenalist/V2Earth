@@ -561,6 +561,33 @@ Residual, accepted: the render additionally applies the `nearestBurnable` mask
 nudge after anchoring, which the card does not, so the two can differ by the
 width of that nudge — far too small to change which city is nearest.
 
+### Closing cleanup — 2026-07-31 (end of session)
+
+- ✅ **Consent banner copy corrected.** "Nothing is saved on your device between
+  visits" → "Your chat history is never saved between visits; the only thing
+  kept on your device is your answer to this question." `privacy.html` was
+  already accurate on this point ("The only thing the app stores in your browser
+  is a single flag"), so this aligns the banner summary with the policy rather
+  than changing the policy.
+
+  *Version note, for the audit session:* `CONSENT_VERSION` is `'2026-07-31'` and
+  privacy.html's "Last updated" is July 31 2026 — both already today's date, so
+  a same-day correction cannot be expressed by the bump mechanism, which is
+  date-based. Nobody was re-prompted. Pre-launch that affects only the
+  operator's own test accepts, but the mechanism's granularity is worth a look
+  before real users exist.
+
+- ✅ **Favicon added.** `public/favicon.svg` (stylized globe, chunky shapes so it
+  survives 16 px; SVG so no binary enters the repo) plus a
+  `<link rel="icon" type="image/svg+xml">` in `index.html`. Declaring an icon
+  suppresses the browser's implicit `/favicon.ico` request, so "the console is
+  clean" becomes an unambiguous check instead of "clean except the usual 404".
+  Served from `'self'`, so the existing `img-src` CSP covers it.
+
+- ✅ **`.gitignore` updated** for `Screenshots Eye Ball Test/` and
+  `last prompt/`. ⚠ These are already tracked from `20cc949`, and gitignore does
+  not untrack — see the command in the session notes.
+
 ### Follow-ups opened by this run
 
 - [ ] **Consent banner copy is inaccurate.** It reads "Nothing is saved on

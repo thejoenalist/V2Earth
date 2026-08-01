@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Earth Simulator">
+  <!-- Favicon: stylized globe matching the app's chapter aesthetic (deep ocean
+       blue, warm landmass). Shapes are deliberately chunky so they stay legible
+       at 16px. SVG rather than .ico so there is no binary in the repo — and
+       declaring it in index.html stops browsers requesting /favicon.ico, which
+       was the only console error on a clean load (2026-07-31). -->
+  <defs>
+    <radialGradient id="ocean" cx="38%" cy="32%" r="78%">
+      <stop offset="0%" stop-color="#2f7fb5"/>
+      <stop offset="70%" stop-color="#12496e"/>
+      <stop offset="100%" stop-color="#0a2c45"/>
+    </radialGradient>
+  </defs>
+
+  <circle cx="32" cy="32" r="29" fill="url(#ocean)"/>
+
+  <!-- Landmasses — suggestive, not cartographic -->
+  <g fill="#6f9e52">
+    <path d="M16 22c4-4 10-5 14-2 3 2 2 6-1 8-4 2-9 2-12 0-2-2-2-4-1-6z"/>
+    <path d="M28 38c5-3 11-2 14 2 2 3 0 7-4 8-5 1-10-1-12-4-1-2 0-5 2-6z"/>
+    <path d="M44 18c4 0 7 3 7 6s-3 5-6 4-5-4-4-7c0-2 1-3 3-3z"/>
+  </g>
+
+  <!-- Terminator: the day/night edge the globe actually renders -->
+  <path d="M32 3a29 29 0 0 1 0 58A34 34 0 0 0 32 3z" fill="#04121d" opacity="0.42"/>
+
+  <circle cx="32" cy="32" r="29" fill="none" stroke="#7dd3fc" stroke-opacity="0.5" stroke-width="2"/>
+</svg>
