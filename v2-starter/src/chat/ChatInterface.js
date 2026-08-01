@@ -15,7 +15,7 @@
 
 import { EventBus } from '../core/EventBus.js';
 import { ScenarioParser } from './ScenarioParser.js';
-import { getImpactStats, loadImpactData, fmtNum, fmtSigned } from '../data/ImpactStats.js';
+import { getImpactStats, loadImpactData, fmtNum, fmtSigned, resolveEventAnchor } from '../data/ImpactStats.js';
 import { seaLevelHumanLine } from '../data/HumanScale.js';
 import { SIMULATION_DECISION_GRACE_MS } from '../simulation/ActiveSimulation.js';
 
@@ -203,7 +203,15 @@ export class ChatInterface {
     if (!eventType) return;
     const year   = command.params?.year ?? this._timeController.year;
     const ssp    = command.params?.ssp  ?? this._timeController.ssp;
-    const center = command.params?.center ?? null;
+    // Same anchor the globe uses. For a country-level wildfire the render
+    // re-anchors onto the most populous city, so reading the raw parser centre
+    // here made the card contradict the globe — "Sydney — 4.6M people" on the
+    // fire, "Nearest: Adelaide (1166 km)" in the card (2026-07-31, finding E).
+    const anchor = await resolveEventAnchor({
+      eventType, iso: command.target, center: command.params?.center ?? null,
+      placeSpecificity: command.params?.placeSpecificity,
+    });
+    const center = anchor.lon != null ? { lon: anchor.lon, lat: anchor.lat } : null;
 
     let stats;
     try {

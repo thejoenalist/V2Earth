@@ -105,7 +105,17 @@ ALWAYS respond with valid JSON. Choose the type that best fits the query:
            "earthquake" | "volcanic_eruption" | "storm_surge" | "epidemic_outbreak" | "locust_swarm" |
            "harmful_algal_bloom" | "power_grid_failure" | "wildfire_smoke" | "infrastructure_cascade" |
            "sinkhole" | "crop_failure" | "solar_storm" | null,
-  "params": { "magnitude": <number|null>, "unit": "<string|null>", "year": <number|null>, "ssp": "SSP2-4.5"|"SSP5-8.5"|null, "center": { "lon": <decimal degrees>, "lat": <decimal degrees> } },
+  "params": { "magnitude": <number|null>, "unit": "<string|null>", "year": <number|null>, "ssp": "SSP2-4.5"|"SSP5-8.5"|null, "center": { "lon": <decimal degrees>, "lat": <decimal degrees> }, "placeSpecificity": "country"|"region"|"place" },
+
+CRITICAL RULE FOR placeSpecificity: report how precisely the USER named a location — not how precise your center is.
+  "country" — only a country or nothing was named: "wildfire in Australia", "drought in Chad", "heatwave"
+  "region"  — a sub-national region, state, or natural area: "wildfire in New South Wales", "drought in the Sahel"
+  "place"   — a specific city, town, or landmark, however small or remote: "wildfire near Alice Springs",
+              "sea level rise in Miami", "hurricane in New Orleans"
+Use "place" for a named town even if it is tiny and remote. Renders rely on this to decide whether they may
+reposition the event: a "country" query may be moved to a representative populated area and labelled as
+illustrative, while "region" and "place" queries are always drawn where the user pointed. Getting this wrong
+relocates a user's town to a distant capital, so choose "place" whenever a specific settlement is named.
 
 CRITICAL RULE FOR center: center MUST always be the precise geographic coordinates of the specific location mentioned by the user — never the country centroid.
 Examples:

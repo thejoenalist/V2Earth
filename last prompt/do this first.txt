@@ -1,0 +1,55 @@
+On the laptop:
+
+git clone https://github.com/thejoenalist/V2Earth.git
+cd V2Earth/v2-starter
+npm install
+
+Then create v2-starter/.env.local by hand with four values:
+
+VITE_CESIUM_ION_TOKEN=...    # ion.cesium.com → Access Tokens
+VITE_SUPABASE_URL=...        # Supabase → Project Settings → API
+VITE_SUPABASE_ANON_KEY=...   # same page (anon/public key — safe in browser)
+ANTHROPIC_API_KEY=...        # console.anthropic.com — DEV ONLY, used by the
+                             # local parse proxy; never reaches the browser
+
+Easiest is to copy the values from the .env.local on this machine. Don't paste them into chat, email, or a commit — the Anthropic key especially, since it bills your credits. A password manager note or a USB copy is fine.
+
+Then npm run dev → localhost:5173.
+
+Two gotchas specific to this project:
+
+Cesium ion tokens are scoped per-token, so if you generate a new one rather than reusing the existing token, give it access to asset 1 (World Terrain) and OSM Buildings, or terrain silently falls back to a flat ellipsoid.
+
+Python is only needed for the data pipeline (pipeline/), and you almost certainly don't want to run it locally — the bakes run in GitHub Actions and need DEM downloads. Skip it unless you're editing pipeline code.
+
+The thing that will actually bite you: working across two machines. Today's rebase mess (that duplicate flyToISO) came from main moving ahead while you worked. Habit to adopt: git pull before you start on either machine, push before you stop. If you ever see "remote had moved ahead" again, diff the result before trusting it.
+
+Claude and Cursor both pick up CLAUDE.md automatically since it's committed, so context carries over with no setup — that's the whole point of the file.
+
+Heads up: VERIFY_CHECKLIST_2026-07-14.md isn't in the folder — CLAUDE.md references it, but it's not on disk. So here's the list reconstructed from CLAUDE.md's owed items.
+
+First — re-verify the two things you just changed:
+
+Console is clean (no CSP violations, no importScripts errors)
+Fresh incognito load: consent banner appears after "Explore the Earth," not before
+Footer Contact opens your mail client to thejoenalist@gmail.com
+
+Wave-3 renders that landed unverified (the main event):
+
+Hurricane in Norfolk — analog track polyline (Isabel 2003) + marker walking it + "historical analog — not a forecast" label
+Hurricane in Shanghai — In-fa 2021; first Western Pacific basin entry, so watch that it picks the right storm
+Sea level rise in Lagos and in Rotterdam — real inundation polygons, baked area_km², Rotterdam should show its below-sea-level/Delta Works caveat
+Sea level rise in Miami — flagship path; the city close-up should fire ~7s in
+
+Two specific bug-fix confirmations:
+
+Wildfire in Australia → fire near Sydney with "illustrative placement — country-level query" on screen, not in the Outback. Then wildfire near Alice Springs → should still be the Centre. (Mongolia is a good second desert check.)
+Heatwave: Today vs 2100 SSP5-8.5 → intensity must visibly differ. This regressed once already when 2025 heatwaves went invisible, so look at both.
+
+Cheap extras while you're in there:
+
+Solar storm → should draw nothing on the globe, chat explains it's out of scope (no more mid-Atlantic circle)
+Click a country → panel opens with real data
+Stack 3 events → 4th is refused; "forget that" ejects the stack
+
+Anything that looks wrong, screenshot it and tell me which query produced it.

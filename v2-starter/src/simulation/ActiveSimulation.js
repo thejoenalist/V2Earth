@@ -14,7 +14,7 @@
 import { EVENT_TYPES } from '../chat/SimulationCommand.js';
 import { EventBus } from '../core/EventBus.js';
 import { getCentroid } from '../globe/RegionCentroids.js';
-import { getImpactStats, fmtCount, largestCityForISO } from '../data/ImpactStats.js';
+import { getImpactStats, fmtCount, resolveEventAnchor } from '../data/ImpactStats.js';
 import { getCountryFeature, featureToPolygonRings } from '../data/CountryGeometry.js';
 import { loadAdmin1, regionToPolygonRings } from './Admin1Geodata.js';
 import { loadLandMask } from './LandMaskGeodata.js';
@@ -217,13 +217,17 @@ export class ActiveSimulation {
       this._pinLabel = this._track(this.viewer.entities.add({
         position: Cesium.Cartesian3.fromDegrees(lon, lat),
         label: {
-          text: `📌 pinned to the scenario you asked for — ${this.ssp} · ${this.year}`
+          // No emoji: Cesium's SDF label atlas rendered 📌 as a wrong glyph on
+          // Windows/Brave. Plain text only. horizontalOrigin CENTER because the
+          // default LEFT origin clipped the first character of line 2.
+          text: `PINNED to the scenario you asked for — ${this.ssp} · ${this.year}`
             + '\nthe side panel follows the timeline',
           font: 'bold 12px system-ui',
           fillColor: Cesium.Color.fromCssColorString('#fde68a'),
           outlineColor: Cesium.Color.BLACK,
           outlineWidth: 2,
           style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
           verticalOrigin: Cesium.VerticalOrigin.TOP,
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
           pixelOffset: new Cesium.Cartesian2(0, 34),
@@ -546,8 +550,10 @@ export class ActiveSimulation {
           outlineWidth: 2,
           ...LABEL_PLATE,
           style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          // Counterpart to the surge label's upward push — see the note there.
+          horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
           verticalOrigin: Cesium.VerticalOrigin.TOP,
-          pixelOffset: new Cesium.Cartesian2(0, 10),
+          pixelOffset: new Cesium.Cartesian2(0, 44),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
       }));
@@ -622,8 +628,13 @@ export class ActiveSimulation {
           outlineWidth: 2,
           ...LABEL_PLATE,
           style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-          verticalOrigin: Cesium.VerticalOrigin.TOP,
-          pixelOffset: new Cesium.Cartesian2(0, 8),
+          // Pushed well ABOVE its anchor, while the analog label below is
+          // pushed well below its own: for a coastal metro the surge anchor,
+          // the landfall point and the city pin are within a few km of each
+          // other, so all three used to pile up (New Orleans, 2026-07-31).
+          horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+          verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+          pixelOffset: new Cesium.Cartesian2(0, -46),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
       }));
@@ -657,6 +668,23 @@ export class ActiveSimulation {
         ...LABEL_PLATE,
       },
     }));
+  }
+
+  /**
+   * "City — N people" line for a stat label, with the distance appended once the
+   * city is far enough that leaving it out would imply proximity.
+   *
+   * "wildfire near Alice Springs" anchors on Adelaide — the nearest baked city
+   * in a 1,000-city dataset, and 1,330 km away. A bare "Adelaide — 1.1M people"
+   * sitting beside the fire reads as though the fire were next to Adelaide
+   * (2026-07-31). The distance is baked (haversine over cities.json), so saying
+   * it costs nothing and removes the false implication. Shared by the five stat
+   * labels that carry a city anchor.
+   */
+  _cityAnchorLine(city) {
+    const base = `${city.name} — ${fmtCount(city.population)} people`;
+    const km = city.distanceKm;
+    return (km != null && km >= 200) ? `${base}, ${Math.round(km)} km away` : base;
   }
 
   /**
@@ -956,14 +984,25 @@ export class ActiveSimulation {
     // city puts "wildfire in Australia" in the populated fire country people
     // mean, and the city callout becomes meaningful. Baked cities.json only
     // (rule #4); explicit-center queries keep the parser's placement.
-    let cityBiased = false;
-    const hasExplicitCenter =
-      this.command.params?.center?.lon != null && this.command.params?.center?.lat != null;
-    if (!hasExplicitCenter) {
-      const big = await largestCityForISO(this.command.target);
-      if (this._destroyed) return;
-      if (big) { lon = big.lon; lat = big.lat; cityBiased = true; }
-    }
+    // Updated 2026-07-31 (finding E). The original gate was "did the parser omit
+    // a center?" — but the system prompt requires `center` on EVERY
+    // climate_event, so that branch never ran and the caveat line never showed.
+    // Worse, the centroid the LLM invents for a whole country is unstable:
+    // identical "wildfire in Australia" prompts produced Sydney (3 km) on one
+    // run and a spot 1,166 km from Adelaide on the next.
+    //
+    // resolveEventAnchor() owns that decision and ChatInterface calls the same
+    // function for its By-the-numbers card, so the globe and the card cannot
+    // disagree about which city is nearest (they did, briefly, on 2026-07-31).
+    const anchor = await resolveEventAnchor({
+      eventType: 'wildfire',
+      iso: this.command.target,
+      center: this.command.params?.center ?? center,
+      placeSpecificity: this.command.params?.placeSpecificity,
+    });
+    if (this._destroyed) return;
+    const cityBiased = anchor.cityBiased;
+    if (anchor.lon != null) { lon = anchor.lon; lat = anchor.lat; }
 
     if (mask) {
       const b = mask.nearestBurnable(lon, lat, 40);
@@ -1096,7 +1135,7 @@ export class ActiveSimulation {
     }
     const anchorCity = stats?.nearestCities?.[0];
     if (anchorCity) {
-      lines.push(`${anchorCity.name} — ${fmtCount(anchorCity.population)} people`);
+      lines.push(this._cityAnchorLine(anchorCity));
     }
     // Honest framing when we chose the spot (country-level query): the fire's
     // location is illustrative, not a modeled ignition point.
@@ -1380,7 +1419,7 @@ export class ActiveSimulation {
     }
     const anchorCity = stats?.nearestCities?.[0];
     if (anchorCity) {
-      lines.push(`${anchorCity.name} — ${fmtCount(anchorCity.population)} people`);
+      lines.push(this._cityAnchorLine(anchorCity));
     }
 
     this._addStatLabel(lon, lat + radius / 111_000 + 1.5, lines.join('\n'), '#fde68a');
@@ -1564,7 +1603,7 @@ export class ActiveSimulation {
     }
     const anchorCity = stats?.nearestCities?.[0];
     if (anchorCity) {
-      lines.push(`${anchorCity.name} — ${fmtCount(anchorCity.population)} people`);
+      lines.push(this._cityAnchorLine(anchorCity));
     }
 
     this._addStatLabel(lon, lat + radius / 111_000 + 1.5, lines.join('\n'), '#fca5a5');
@@ -1696,7 +1735,7 @@ export class ActiveSimulation {
     }
     const anchorCity = stats?.nearestCities?.[0];
     if (anchorCity) {
-      lines.push(`${anchorCity.name} — ${fmtCount(anchorCity.population)} people`);
+      lines.push(this._cityAnchorLine(anchorCity));
     }
     lines.push('illustrative displacement — not a prediction');
 
@@ -1837,7 +1876,7 @@ export class ActiveSimulation {
     }
     const anchorCity = stats?.nearestCities?.[0];
     if (anchorCity) {
-      lines.push(`${anchorCity.name} — ${fmtCount(anchorCity.population)} people`);
+      lines.push(this._cityAnchorLine(anchorCity));
     }
     // Honest framing, always on-screen: the geometry is indicative, and for
     // national mode the boundary is an extent anchor, not a modeled footprint.

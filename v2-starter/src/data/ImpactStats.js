@@ -124,6 +124,56 @@ function nearestCities(cities, center, { coastalOnly = false, k = 3, maxKm = 120
 }
 
 /**
+ * Event types whose renders re-anchor country-level queries onto the most
+ * populous city. Localized hazards only: a wildfire has to be *somewhere*, and
+ * a spot 1,000 km from anyone reads as fire-on-sand. Country-scale events
+ * (drought, heatwave) paint a national polygon and need no such nudge.
+ */
+const COUNTRY_LEVEL_ANCHOR_EVENTS = new Set(['wildfire']);
+
+/**
+ * Single source for "where does this event actually go?".
+ *
+ * Both `ActiveSimulation` (which draws the fire) and `ChatInterface` (which
+ * renders the By-the-numbers card) must agree on the anchor, or the globe and
+ * the card disagree about which city is nearest — on 2026-07-31 the globe read
+ * "Sydney — 4.6M people" while the card read "Nearest: Adelaide (1166 km)",
+ * because each computed its own. This function is deterministic, so both
+ * callers land on the same answer without any event plumbing between them.
+ *
+ * Gated on the parser's `placeSpecificity`, NOT on distance to the nearest baked
+ * city. Distance was tried first and cannot work: `cities.json` holds 1,000
+ * cities worldwide — seven in Australia, all coastal capitals — so an invented
+ * whole-country centroid (1,166 km from the nearest) and a genuinely remote
+ * named town (Alice Springs, ~1,330 km from the same set) land in the same
+ * range. Any threshold that catches the first relocates the second, which is
+ * strictly worse: it moves a place the user explicitly named. Only the parser
+ * knows which was asked for, so it now says so.
+ *
+ * @param {{eventType:string|null, iso:string|null|undefined,
+ *          center:{lon:number,lat:number}|null,
+ *          placeSpecificity:string|null|undefined}} args
+ * @returns {Promise<{lon:number|null, lat:number|null, cityBiased:boolean}>}
+ */
+export async function resolveEventAnchor({ eventType, iso, center, placeSpecificity }) {
+  const lon = center?.lon ?? null;
+  const lat = center?.lat ?? null;
+  if (!COUNTRY_LEVEL_ANCHOR_EVENTS.has(eventType)) {
+    return { lon, lat, cityBiased: false };
+  }
+  // Only 'country' re-anchors. A missing value means an older parser response
+  // (or the edge function not yet redeployed) — treat it as place-level and
+  // leave the centre alone: failing to re-anchor is a cosmetic miss, whereas
+  // relocating a named place is a correctness bug.
+  const countryLevel = placeSpecificity === 'country' || (lon == null || lat == null);
+  if (!countryLevel) return { lon, lat, cityBiased: false };
+
+  const big = await largestCityForISO(iso);
+  if (!big) return { lon, lat, cityBiased: false };
+  return { lon: big.lon, lat: big.lat, cityBiased: true };
+}
+
+/**
  * Most populous baked city in a country. Used by renders that need a
  * population-biased anchor for country-level queries (wildfire, decision
  * 2026-07-16): the anchor comes from baked cities.json (rule #4), never the
@@ -183,8 +233,22 @@ export async function getImpactStats({ eventType, iso, year, ssp, center = null 
   const coverageTier = climate?.coverage_tier ?? null;
 
   // Nearest cities — coastal bias for water-driven events.
+  //
+  // Two-pass radius (2026-07-31): the default 1,200 km returns nothing at all
+  // for genuinely remote places — cities.json holds 1,000 cities worldwide, so
+  // "wildfire near Alice Springs" has no baked city inside that radius (Adelaide
+  // is ~1,330 km). The render then lost its city line AND the card lost its
+  // "Nearest:" row, leaving a fire in empty terrain with nothing saying where
+  // you were looking. Falling back to a wider search is strictly better: the
+  // distance is displayed alongside the name, so "Adelaide (1,330 km)" reads
+  // honestly as remote rather than pretending the fire is near a city.
   const coastalEvent = eventType === 'sea_level_rise' || eventType === 'hurricane';
-  const near = nearestCities(data.cities, center, { coastalOnly: coastalEvent, k: 3 })
+  const cityOpts = { coastalOnly: coastalEvent, k: 3 };
+  let hits = nearestCities(data.cities, center, cityOpts);
+  if (hits.length === 0) {
+    hits = nearestCities(data.cities, center, { ...cityOpts, maxKm: 4000 });
+  }
+  const near = hits
     .map(({ city, distanceKm }) => {
       const exposedPop = (climate?.exposed_population_pct != null)
         ? Math.round(city.population * climate.exposed_population_pct)
