@@ -11,7 +11,8 @@
 //   4. no window.* global assignments in src/
 //   5. no inline ISO alpha-2→alpha-3 maps outside ISONormalizer.js
 //   6. attribution.json + manifest.json presence / baked_at
-//   7. innerHTML interpolation heuristic (WARN only)
+//   7. support in VALID_TYPES + ChatInterface raw short-circuit
+//   8. innerHTML interpolation heuristic (WARN only)
 //
 // Exit code 1 if any FAIL. WARNs never fail the run.
 
@@ -145,15 +146,55 @@ section('baked data & attribution');
   }
 }
 
-// ── 7. innerHTML interpolation heuristic ─────────────────────────────────────
+// ── 7. support type in VALID_TYPES (deploy-skew tripwire) ─────────────────────
+section('support type registration');
+{
+  // Static source check — importing ScenarioParser pulls Vite import.meta.env.
+  const parserSrc = readFileSync(path.join(SRC, 'chat', 'ScenarioParser.js'), 'utf8');
+  const typesBlock = parserSrc.match(/export const VALID_TYPES = Object\.freeze\(\[([\s\S]*?)\]\)/);
+  if (!typesBlock) {
+    fail('export const VALID_TYPES = Object.freeze([...]) not found in ScenarioParser.js');
+  } else if (!/['"]support['"]/.test(typesBlock[1])) {
+    fail('VALID_TYPES missing "support" — crisis path will throw Invalid command type in prod');
+  } else {
+    pass('VALID_TYPES includes "support"');
+  }
+
+  const chat = readFileSync(path.join(SRC, 'chat', 'ChatInterface.js'), 'utf8');
+  if (chat.includes("raw.type === 'support'") || chat.includes('raw.type === "support"')) {
+    pass('ChatInterface short-circuits on raw.type === "support" before validation');
+  } else {
+    fail('ChatInterface missing raw.type === "support" short-circuit before validation');
+  }
+}
+
+// ── 8. innerHTML interpolation heuristic ─────────────────────────────────────
 section('innerHTML interpolation (heuristic)');
 {
+  // Known-safe sites: static trusted copy from supportMessage.js (no interpolation).
+  // ChatInterface.js — _renderSupport / _renderSupportOfferFooter assign
+  // SUPPORT_MESSAGE_HTML / SUPPORT_OFFER_FOOTER_HTML via innerHTML. Do not remove
+  // those allowlist comments without removing the assignments.
+  const chat = readFileSync(path.join(SRC, 'chat', 'ChatInterface.js'), 'utf8');
+  const allowlisted = [
+    'ALLOWLISTED innerHTML: static trusted copy (SUPPORT_MESSAGE_HTML)',
+    'ALLOWLISTED innerHTML: static trusted copy (SUPPORT_OFFER_FOOTER_HTML)',
+  ];
+  for (const marker of allowlisted) {
+    if (chat.includes(marker)) pass(`allowlisted support innerHTML: ${marker.match(/\(([^)]+)\)/)[1]}`);
+    else fail(`missing allowlist marker for static support HTML: ${marker}`);
+  }
+
   const hits = [];
   for (const f of walk(SRC)) {
     const text = readFileSync(f, 'utf8');
     const lines = text.split('\n');
     lines.forEach((line, i) => {
-      if (line.includes('innerHTML') && /\$\{(?!escapeHtml)/.test(line)) hits.push(`${rel(f)}:${i + 1}`);
+      if (!line.includes('innerHTML') || !/\$\{(?!escapeHtml)/.test(line)) return;
+      // Skip if the preceding line marks an allowlisted static trusted assignment.
+      const prev = lines[i - 1] ?? '';
+      if (prev.includes('ALLOWLISTED innerHTML: static trusted copy')) return;
+      hits.push(`${rel(f)}:${i + 1}`);
     });
   }
   if (hits.length) warn(`innerHTML with interpolation — verify each is escaped: ${hits.join(', ')}`);

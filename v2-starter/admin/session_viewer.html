@@ -251,7 +251,9 @@
         case 'ssp_change':      text = `→ Pathway: ${p.ssp}`; break;
         case 'region_click':    text = `Clicked ${p.iso}`; break;
         case 'region_dwell':    text = `Dwelled on ${p.iso} for ${Math.round((p.durationMs ?? 0) / 1000)}s`; break;
-        case 'chat_query':      text = `💬 "${p.text}"`; break;
+        case 'chat_query':      text = `💬 "${p.textPreview ?? ''}"${p.type ? ` [${p.type}${p.event ? '/' + p.event : ''}]` : ''}`; break;
+        case 'support_shown':   text = '🛟 support shown'; break;
+        case 'support_offered': text = '🛟 support offered'; break;
         case 'simulation_trigger': text = `⚡ Simulation: ${p.event} / ${p.iso} / ${p.year}`; break;
         case 'session_end':     text = `Session ended (${Math.round((p.durationMs || 0) / 60000)}m total)`; break;
         default:                text = `${ev.event}: ${JSON.stringify(p).slice(0, 60)}`;

@@ -272,7 +272,16 @@ All `.env.local` variables available locally. VS Code + Vite extension for HMR.
 
 **Deploy flow:** push to `main` → GitHub Actions validates → Netlify auto-builds and deploys.
 No manual deploy steps required.
-**Production URL:** `https://chipper-faun-a051b1.netlify.app` (live since 2026-07-05).
+**Production URL:** `https://joenalism.netlify.app` (renamed 2026-07-31; previously
+`https://chipper-faun-a051b1.netlify.app`, live since 2026-07-05).
+
+⚠ **Renaming the Netlify site breaks chat until the edge secret follows it.**
+`parse-scenario` sends `Access-Control-Allow-Origin: $ALLOWED_ORIGIN`; if that secret
+still names the old host the browser blocks every parser response and the app looks
+dead (globe and timeline keep working, so it reads as a total failure rather than a
+CORS problem). After any hostname change:
+`npx supabase secrets set ALLOWED_ORIGIN=<new origin>` then redeploy the function.
+Check the Cesium ion token's domain allow-list at the same time.
 
 ---
 

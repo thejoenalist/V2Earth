@@ -22,6 +22,7 @@ const VALID_TYPES = new Set([
   'resilience_plan',
   'explain',
   'empowerment_quiz',
+  'support',
 ]);
 
 const ANTHROPIC_MODEL = 'claude-haiku-4-5-20251001';
@@ -139,15 +140,22 @@ export function devParseScenarioPlugin() {
 
           if (!anthropicRes.ok) {
             const errText = await anthropicRes.text().catch(() => '');
-            let detail = errText.slice(0, 300);
-            try {
-              detail = JSON.parse(errText).error?.message ?? detail;
-            } catch {
-              /* use raw text */
+            // Mirror edge-function mapping: log detail locally, never forward body.
+            console.error('[dev-parse-scenario] Anthropic error', anthropicRes.status, errText.slice(0, 300));
+            const body = errText.toLowerCase();
+            const creditHints = ['credit', 'credits', 'billing', 'quota', 'insufficient', 'payment', 'usage limit'];
+            if (anthropicRes.status === 429) {
+              sendJson(res, 429, { error: 'Too many requests — please slow down', code: 'rate_limited' });
+              return;
             }
-            sendJson(res, 502, {
-              error: `Anthropic API error (${anthropicRes.status}): ${detail}`,
-            });
+            if (
+              anthropicRes.status === 402 ||
+              creditHints.some((h) => body.includes(h))
+            ) {
+              sendJson(res, 503, { error: 'Chat temporarily unavailable', code: 'credits_exhausted' });
+              return;
+            }
+            sendJson(res, 502, { error: 'Chat temporarily unavailable', code: 'upstream_error' });
             return;
           }
 
@@ -159,7 +167,14 @@ export function devParseScenarioPlugin() {
             return;
           }
 
-          const command = JSON.parse(extractJson(textBlock.text));
+          let command;
+          try {
+            command = JSON.parse(extractJson(textBlock.text));
+          } catch {
+            console.error('[dev-parse-scenario] Model did not return valid JSON. Raw text:', textBlock.text);
+            sendJson(res, 502, { error: 'Model did not return valid JSON' });
+            return;
+          }
 
           if (!command || typeof command !== 'object' || !VALID_TYPES.has(command.type)) {
             sendJson(res, 502, { error: `Invalid command type: ${command?.type}` });

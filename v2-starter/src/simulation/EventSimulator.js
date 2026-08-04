@@ -71,6 +71,9 @@ export class EventSimulator {
    * @param {import('../chat/SimulationCommand.js').SimulationCommand} command
    */
   async _onRequested(command) {
+    // Crisis carve-out: never touch the globe or clear layers.
+    if (command?.type === 'support') return;
+
     const incomingEvent = command.params?.eventType ?? command.event ?? null;
 
     if (command.eject === true) {

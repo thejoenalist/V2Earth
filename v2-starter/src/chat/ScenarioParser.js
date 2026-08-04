@@ -14,7 +14,8 @@ const SUPABASE_URL = getSupabaseOrigin(import.meta.env.VITE_SUPABASE_URL ?? '');
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY ?? '';
 const LOCAL_PARSE_URL = '/api/parse-scenario';
 
-const VALID_TYPES = Object.freeze([
+/** Canonical command types accepted by _validate. Exported for verify-all. */
+export const VALID_TYPES = Object.freeze([
   'climate_event',
   'scenario_compare',
   'region_inspect',
@@ -24,22 +25,44 @@ const VALID_TYPES = Object.freeze([
   'resilience_plan',
   'explain',
   'empowerment_quiz',
+  'support',
 ]);
 
 const SAHEL_ISOS = new Set(['NER', 'MLI', 'BFA', 'TCD', 'MRT', 'SEN', 'SDN', 'ETH', 'GMB', 'GIN', 'CMR']);
+
+/** Minimal support command — narrative is empty by design; UI uses hardcoded HTML. */
+export function canonicalSupportCommand() {
+  return {
+    type: 'support',
+    target: null,
+    event: null,
+    eject: false,
+    offerSupport: false,
+    params: {},
+    narrative: { learned: '', action: '', emotion: '', sources: [] },
+  };
+}
 
 export class ScenarioParser {
   constructor() {
     this._history = [];
   }
 
+  /**
+   * Fetch + validate (legacy single-shot). Prefer fetchRaw + validate in UI so
+   * crisis/support can short-circuit before schema validation.
+   */
   async parse(userText, currentContext) {
-    // History is only committed after a successful parse (see below).
-    // Committing the user turn up-front left a dangling user message on
-    // failure, producing consecutive user roles on the next request —
-    // which the Anthropic API rejects, bricking chat for the session.
-    const historyForRequest = this._history.slice(-10);
+    const raw = await this.fetchRaw(userText, currentContext);
+    return this.validateAndCommit(userText, raw);
+  }
 
+  /**
+   * HTTP fetch only — returns the raw JSON body with no schema validation.
+   * Throws on network / non-OK / error-payload responses.
+   */
+  async fetchRaw(userText, currentContext) {
+    const historyForRequest = this._history.slice(-10);
     const payload = {
       query: userText,
       year: currentContext.year,
@@ -47,52 +70,67 @@ export class ScenarioParser {
       history: historyForRequest,
     };
 
-    let command;
+    let raw = null;
     let lastError = null;
 
     if (import.meta.env.DEV) {
       try {
-        command = await this._requestParse(LOCAL_PARSE_URL, payload);
+        raw = await this._requestRaw(LOCAL_PARSE_URL, payload);
       } catch (err) {
         lastError = err;
       }
     }
 
-    if (!command && SUPABASE_URL) {
+    if (!raw && SUPABASE_URL) {
       try {
-        command = await this._requestParse(
+        raw = await this._requestRaw(
           `${SUPABASE_URL}/functions/v1/parse-scenario`,
           payload,
-          {
-            Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-          },
+          { Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
         );
       } catch (err) {
         lastError = err;
       }
     }
 
-    if (!command) {
+    if (!raw) {
       if (!SUPABASE_URL && !import.meta.env.DEV) {
-        return this._devStub();
+        return this._devStubRaw();
       }
       throw lastError ?? new Error('No scenario parser available');
     }
+
+    return raw;
+  }
+
+  /**
+   * Schema-validate a raw body, normalize, commit chat history, return command.
+   */
+  validateAndCommit(userText, raw) {
+    const command = this._validate(raw);
 
     if (command.target) {
       command.target = normalizeISO(command.target) ?? command.target;
     }
 
+    this._commitHistory(userText, command);
+    return createCommand(command);
+  }
+
+  /** Record a turn without validation (used for the support short-circuit). */
+  commitSupport(userText) {
+    this._commitHistory(userText, canonicalSupportCommand());
+  }
+
+  _commitHistory(userText, command) {
     this._history.push({ role: 'user', content: userText });
     this._history.push({ role: 'assistant', content: JSON.stringify(command) });
     if (this._history.length > 10) {
       this._history = this._history.slice(-10);
     }
-
-    return createCommand(command);
   }
 
-  async _requestParse(url, payload, extraHeaders = {}) {
+  async _requestRaw(url, payload, extraHeaders = {}) {
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -104,15 +142,18 @@ export class ScenarioParser {
 
     const data = await response.json().catch(() => ({}));
 
-    if (!response.ok) {
-      throw new Error(data.error ?? `[ScenarioParser] Parser error: ${response.status}`);
+    if (!response.ok || data.error) {
+      const err = new Error(
+        typeof data.error === 'string' && data.error
+          ? data.error
+          : `[ScenarioParser] Parser error: ${response.status}`,
+      );
+      // Propagate machine-readable code for ChatInterface (credits / rate / upstream).
+      if (typeof data.code === 'string') err.code = data.code;
+      throw err;
     }
 
-    if (data.error) {
-      throw new Error(data.error);
-    }
-
-    return this._validate(data);
+    return data;
   }
 
   _validate(cmd) {
@@ -121,6 +162,11 @@ export class ScenarioParser {
     }
 
     const raw = cmd;
+
+    // Support: ignore malformed extras — UI never reads narrative for this type.
+    if (raw.type === 'support') {
+      return canonicalSupportCommand();
+    }
 
     if (!VALID_TYPES.includes(raw.type)) {
       throw new Error(`[ScenarioParser] Invalid command type: ${raw.type}`);
@@ -142,6 +188,9 @@ export class ScenarioParser {
     if (typeof raw.params.year === 'number') {
       raw.params.year = Math.max(2025, Math.min(2100, raw.params.year));
     }
+
+    // offerSupport: climate-hopelessness footer flag. Never true on type "support".
+    raw.offerSupport = raw.offerSupport === true && raw.type !== 'support';
 
     if (!raw.narrative || typeof raw.narrative !== 'object') {
       raw.narrative = {};
@@ -180,8 +229,8 @@ export class ScenarioParser {
     }
   }
 
-  _devStub() {
-    return createCommand({
+  _devStubRaw() {
+    return {
       type: 'explain',
       target: null,
       event: null,
@@ -192,6 +241,6 @@ export class ScenarioParser {
         emotion: '',
         sources: [],
       },
-    });
+    };
   }
 }

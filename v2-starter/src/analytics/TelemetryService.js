@@ -24,9 +24,27 @@ import { getConsent } from '../core/ConsentState.js';
 const SUPABASE_URL = getSupabaseOrigin(import.meta.env.VITE_SUPABASE_URL ?? '');
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY ?? '';
 
+const CHAT_PREVIEW_MAX = 80;
+
 /** @returns {string} */
 function generateSessionId() {
   return `s_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * Build the telemetry payload for chat:query — truncated preview + structured
+ * command fields only. Never keep a raw user string.
+ * @param {{ textPreview?: string, text?: string, commandType?: string|null, event?: string|null }} payload
+ */
+function sanitizeChatQueryPayload(payload = {}) {
+  const raw = typeof payload.textPreview === 'string'
+    ? payload.textPreview
+    : (typeof payload.text === 'string' ? payload.text : '');
+  return {
+    textPreview: raw.slice(0, CHAT_PREVIEW_MAX),
+    type: payload.commandType ?? null,
+    event: payload.event ?? null,
+  };
 }
 
 export class TelemetryService {
@@ -71,8 +89,12 @@ export class TelemetryService {
     EventBus.on('time:changed',      ({ year, ssp }) => this._log('chapter_change', { year, ssp }));
     EventBus.on('ssp:changed',       ({ ssp })       => this._log('ssp_change', { ssp }));
     EventBus.on('layer:changed',     ({ layerId })   => this._log('layer_change', { layerId }));
-    EventBus.on('chat:query',        ({ text })      => this._log('chat_query', { text }));
+    // Never store raw chat text — preview (≤80 chars) + structured command fields only.
+    EventBus.on('chat:query',        (payload)       => this._log('chat_query', sanitizeChatQueryPayload(payload)));
     EventBus.on('simulation:requested', (cmd)        => this._log('simulation_trigger', { type: cmd.type, iso: cmd.target, event: cmd.event, year: cmd.params?.year }));
+    // Support path: boolean flag only — never message content.
+    EventBus.on('support:shown',     ()              => this._log('support_shown', { shown: true }));
+    EventBus.on('support:offered',   ()              => this._log('support_offered', { support_offered: true }));
     EventBus.on('region:selected',   ({ iso })       => this._onRegionSelected(iso));
     EventBus.on('report:export_requested', ({ type, context }) => this._log('report_export', { type, target: context?.target ?? null }));
   }

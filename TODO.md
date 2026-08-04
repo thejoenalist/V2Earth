@@ -36,8 +36,10 @@ lost between sessions. See CLAUDE.md → Open Action Items for full context.
   - Optional: usage alerts at 50% / 80%.
 
 - [x] **ALLOWED_ORIGIN on the edge function** — done 2026-07-05.
-  - Set to `https://chipper-faun-a051b1.netlify.app` (was `*`); `parse-scenario`
-    redeployed. Also: stored `ANTHROPIC_API_KEY` (2026-06-18) was invalid
+  - Set to the production origin (was `*`); `parse-scenario`
+    redeployed. **Re-pointed 2026-07-31** to `https://joenalism.netlify.app`
+    after the site rename — this secret must be updated on every hostname
+    change or CORS silently kills the chat. Also: stored `ANTHROPIC_API_KEY` (2026-06-18) was invalid
     (Anthropic 401 → 502) — replaced with current key; live test 200 + valid
     SimulationCommand.
 
@@ -56,7 +58,7 @@ lost between sessions. See CLAUDE.md → Open Action Items for full context.
 
 ## Post-launch verification
 
-Production is live at `https://chipper-faun-a051b1.netlify.app` (2026-07-05; full `dist/`
+Production is live at `https://joenalism.netlify.app` (renamed 2026-07-31; full `dist/`
 deploy — first attempt was index.html-only, fixed). Bundle/data/CSP headers verified via
 HTTP probe. Still to check manually in the browser:
 
@@ -99,6 +101,13 @@ full-`dist/` redeploy (user-confirmed).
       `silryqzempbblleqaokv`); invalid stored `ANTHROPIC_API_KEY` replaced;
       live test 200 + valid SimulationCommand.
 - [x] `ALLOWED_ORIGIN` locked to production URL.
+- [ ] **Known: `deno check` on `parse-scenario/index.ts` exits 1 with exactly 7
+      `TS7006` implicit-`any` errors** (corsHeaders / isRateLimited / getClientIp /
+      xff map callback / jsonResponse / extractJson / content.find callback).
+      Pre-existing style; leave them. Regression check: count stays 7, and none
+      may reference `ImportMeta` / `import.meta.env` (Vite-only — edge uses
+      `Deno.env.get('LOCAL_DEV') === 'true'` only). Do not “fix” by annotating
+      the whole file mid-change.
 - [x] Netlify production deploy live; bundle/data/CSP verified via HTTP probe.
 - [x] `telemetry_events` table created; RLS anon INSERT-only verified over REST.
 - [x] `npm run verify` green locally. (Note: stale June-29 node process holds

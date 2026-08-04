@@ -66,7 +66,9 @@ export const EventBus = {
  * simulation:requested SimulationCommand (see SimulationCommand.js)
  * simulation:decision_requested { commandId: string, eventType: string|null }  — lifetime reached; ChatInterface prompts keep-or-clear
  * simulation:complete  { commandId: string, eventType?: string|null }
- * chat:query           { text: string, sessionId: string }
+ * chat:query           { textPreview: string(≤80), commandType, event, sessionId }
+ * support:shown        { shown: true }  — crisis carve-out; no message content
+ * support:offered      { support_offered: true }  — boolean only; no content
  * session:start        { sessionId: string }
  * consent:changed      { granted: boolean }  — ConsentState → TelemetryService
  * report:export_requested  { type: string, report: object, context?: object }  → ExportService

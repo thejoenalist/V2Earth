@@ -15,6 +15,7 @@
 
 import { EventBus } from '../core/EventBus.js';
 import { ScenarioParser } from './ScenarioParser.js';
+import { SUPPORT_MESSAGE_HTML, SUPPORT_OFFER_FOOTER_HTML } from './supportMessage.js';
 import { getImpactStats, loadImpactData, fmtNum, fmtSigned, resolveEventAnchor } from '../data/ImpactStats.js';
 import { seaLevelHumanLine } from '../data/HumanScale.js';
 import { SIMULATION_DECISION_GRACE_MS } from '../simulation/ActiveSimulation.js';
@@ -119,17 +120,53 @@ export class ChatInterface {
     }
 
     this._addMessage('user', text);
-    EventBus.emit('chat:query', { text, sessionId: this._sessionId });
 
     const loadingEl = this._addMessage('assistant', '…');
+    const ctx = {
+      year: this._timeController.year,
+      ssp:  this._timeController.ssp,
+    };
+
+    // Fetch raw JSON first so crisis/support can short-circuit BEFORE schema
+    // validation. A malformed support body must still show SUPPORT_MESSAGE_HTML
+    // — the generic catch must never swallow type:"support".
+    let raw = null;
+    try {
+      raw = await this._parser.fetchRaw(text, ctx);
+    } catch (err) {
+      loadingEl.remove();
+      this._showParseError(err);
+      this._isLoading       = false;
+      this._submit.disabled = false;
+      this._input?.focus();
+      return;
+    }
+
+    loadingEl.remove();
+
+    // (a) Acute crisis — hardcoded interstitial; ignore the rest of the body.
+    if (raw && typeof raw === 'object' && raw.type === 'support') {
+      this._renderSupport();
+      EventBus.emit('support:shown', { shown: true });
+      this._parser.commitSupport(text);
+      this._isLoading       = false;
+      this._submit.disabled = false;
+      this._input?.focus();
+      return;
+    }
+
+    const rawOfferSupport = raw?.offerSupport === true;
 
     try {
-      const command = await this._parser.parse(text, {
-        year: this._timeController.year,
-        ssp:  this._timeController.ssp,
-      });
+      const command = this._parser.validateAndCommit(text, raw);
 
-      loadingEl.remove();
+      // Telemetry: truncated preview + structured fields only — never full text.
+      EventBus.emit('chat:query', {
+        textPreview: text.slice(0, 80),
+        commandType: command.type,
+        event: command.event ?? null,
+        sessionId: this._sessionId,
+      });
 
       // Snap the chapter BEFORE emitting simulation:requested: EventSimulator
       // reads TimeController.year synchronously when creating the
@@ -143,19 +180,69 @@ export class ChatInterface {
       EventBus.emit('simulation:requested', command);
       this._renderNarrative(command);
 
+      // Climate hopelessness (b): normal narrative + short hardcoded footer.
+      if (command.offerSupport === true || rawOfferSupport) {
+        this._renderSupportOfferFooter();
+        EventBus.emit('support:offered', { support_offered: true });
+      }
     } catch (err) {
-      loadingEl.remove();
-      const detail = err instanceof Error ? err.message : String(err);
-      const hint = import.meta.env.DEV
-        ? detail
-        : 'Could not process that scenario. Try again.';
-      this._addMessage('error', hint.startsWith('Could not') ? hint : `Could not process that scenario: ${detail}`);
-      console.error('[ChatInterface]', err);
+      // Validation failed, but raw still asked for the hopelessness footer.
+      if (rawOfferSupport) {
+        this._renderSupportOfferFooter();
+        EventBus.emit('support:offered', { support_offered: true });
+      }
+      // Unreachable when raw.type === 'support' (early return above).
+      this._showParseError(err);
     }
 
     this._isLoading       = false;
     this._submit.disabled = false;
     this._input?.focus();
+  }
+
+  /** Map parser/network errors to a user-visible hint. */
+  _showParseError(err) {
+    const code = err && typeof err === 'object' ? err.code : null;
+    let hint;
+    if (code === 'credits_exhausted') {
+      hint = 'Chat is temporarily unavailable. The globe, timeline, and data panels still work — try chat again later.';
+    } else if (code === 'rate_limited') {
+      hint = 'Too many requests right now. Wait a moment and try again.';
+    } else if (code === 'upstream_error') {
+      hint = 'Chat could not reach the scenario service. The rest of the simulator still works — try again shortly.';
+    } else if (import.meta.env.DEV) {
+      const detail = err instanceof Error ? err.message : String(err);
+      hint = `Could not process that message: ${detail}`;
+    } else {
+      // Generic catch-all for non-coded failures. Not reachable for raw
+      // type:"support" — that path returns before validateAndCommit.
+      hint = 'Could not process that message. Try again.';
+    }
+    this._addMessage('error', hint);
+    console.error('[ChatInterface] parse failed', code ?? 'unknown');
+  }
+
+  /**
+   * Full crisis interstitial — static trusted HTML from supportMessage.js.
+   * Never uses model narrative or user input.
+   */
+  _renderSupport() {
+    const el = this._createMessageEl('assistant');
+    el.style.whiteSpace = 'normal';
+    // ALLOWLISTED innerHTML: static trusted copy (SUPPORT_MESSAGE_HTML) — no interpolation.
+    el.innerHTML = SUPPORT_MESSAGE_HTML;
+    this._messages?.appendChild(el);
+    this._messages?.scrollTo({ top: this._messages.scrollHeight, behavior: 'smooth' });
+  }
+
+  /** Short footer under a normal narrative when offerSupport is true. */
+  _renderSupportOfferFooter() {
+    const el = this._createMessageEl('assistant');
+    el.style.whiteSpace = 'normal';
+    // ALLOWLISTED innerHTML: static trusted copy (SUPPORT_OFFER_FOOTER_HTML) — no interpolation.
+    el.innerHTML = SUPPORT_OFFER_FOOTER_HTML;
+    this._messages?.appendChild(el);
+    this._messages?.scrollTo({ top: this._messages.scrollHeight, behavior: 'smooth' });
   }
 
   // ── Narrative routing ─────────────────────────────────────────────────────
@@ -164,6 +251,10 @@ export class ChatInterface {
   _renderNarrative(command) {
     const { type, narrative } = command;
     if (!narrative) return;
+
+    // Belt-and-suspenders: support is handled in _handleSubmit and must never
+    // enter quiz, export, or narrative branches.
+    if (type === 'support') return;
 
     if (type === 'empowerment_quiz') {
       if (narrative.quiz)   this._renderQuiz(narrative.quiz);
@@ -325,7 +416,16 @@ export class ChatInterface {
       const lines = plan.jobs.map(j => `• ${j.sector}: ${j.count} (${j.type})`).join('\n');
       this._addMessage('assistant', `👷 Jobs:\n${lines}`);
     }
-    if (plan.viability) this._addMessage('assistant', `✅ Viability: ${plan.viability.justification}`);
+    if (plan.viability) {
+      const v = plan.viability;
+      const verdicts = [
+        v.profitable != null ? `profitable: ${v.profitable}` : null,
+        v.sustainable != null ? `sustainable: ${v.sustainable}` : null,
+        v.viable != null ? `viable: ${v.viable}` : null,
+      ].filter(Boolean).join(' · ');
+      const head = verdicts ? `✅ Viability (${verdicts})` : '✅ Viability';
+      this._addMessage('assistant', v.justification ? `${head}: ${v.justification}` : head);
+    }
     if (sources?.length) this._addMessage('assistant', `Sources: ${sources.join(', ')}`);
 
     if (plan.exportable) {
