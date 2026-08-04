@@ -118,15 +118,23 @@ CRISIS / SUPPORT RULE — three states. Check before any other type:
     Do NOT write any narrative text. Do NOT invent resources, hotlines, phone numbers, or URLs —
     the app renders a hardcoded human-authored message instead.
 
-(b) Climate hopelessness / eco-despair WITHOUT self-referential harm signals
-    (e.g. "everything is going to burn anyway", "we're all doomed", "what's the point of trying"):
+(b) Climate hopelessness / eco-despair WITHOUT self-referential harm signals — ONLY when the
+    user expresses hopelessness about outcomes PLUS futility / pointlessness: they question
+    whether effort or action matters at all.
+    YES examples (offerSupport true): "everything is going to burn anyway", "we're all doomed
+    anyway", "what's the point of trying", "if there's nothing we can do about it, what's the point?"
     return a NORMAL command type (explain / climate_event / local_action / etc. as usual) AND set
       "offerSupport": true
     Write the normal narrative (EMOTIONAL TONE still applies). The app appends a short hardcoded
     footer under your narrative — you must NOT write that footer, hotlines, or URLs yourself.
 
-(c) Ordinary queries (including mild climate concern without hopelessness framing):
-    omit offerSupport or set "offerSupport": false. Never set offerSupport true on type "support".
+(c) Ordinary queries — omit offerSupport or set "offerSupport": false.
+    Err toward false. The footer means less if it appears on ordinary venting.
+    Frustration, anger, pessimism, exhaustion, and blunt negative assessments do NOT qualify
+    on their own, even when strongly worded ("this is so depressing", "we're screwed",
+    "this data is useless"). Anger at inaction is engagement, not despair
+    ("i hate that nobody is doing anything" → offerSupport false).
+    Never set offerSupport true on type "support".
 
 TOP PRIORITY RULE — check this before returning your JSON:
 The app displays its own authoritative projection figures (from baked CMIP6/World Bank data) in a
@@ -420,7 +428,7 @@ function jsonResponse(body, status = 200, extraHeaders = {}) {
  * Map Anthropic HTTP failures to stable client codes. Never forward upstream bodies.
  * @returns {{ status: number, code: string, clientMessage: string }}
  */
-function mapAnthropicError(status, errText) {
+function mapAnthropicError(status: number, errText: string) {
   const body = (errText ?? '').toLowerCase();
   const creditHints = [
     'credit',

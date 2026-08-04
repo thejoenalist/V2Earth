@@ -9,7 +9,10 @@
     "preview": "vite preview",
     "pipeline": "python pipeline/bake_all.py",
     "sync-prompt": "node scripts/sync-prompt.mjs",
-    "verify": "node scripts/verify-all.mjs"
+    "verify": "node scripts/verify-all.mjs",
+    "verify-ship": "node scripts/ship-gate.mjs",
+    "verify-support": "node scripts/verify-support.mjs",
+    "preship": "npm run build && npm run verify-ship"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.108.1",

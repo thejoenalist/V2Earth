@@ -24,13 +24,23 @@
     a:hover { text-decoration: underline; }
     .back { display: inline-block; margin-bottom: 24px; font-size: 13px; }
     strong { color: #d0e8f5; }
+    table {
+      width: 100%; border-collapse: collapse; margin: 12px 0 16px;
+      font-size: 13px;
+    }
+    th, td {
+      text-align: left; vertical-align: top;
+      padding: 8px 10px; border: 1px solid rgba(80,160,220,0.2);
+    }
+    th { color: #7ec8e3; font-weight: 600; background: rgba(8,28,44,0.6); }
+    td code { font-size: 12px; color: #a8d8f0; }
   </style>
 </head>
 <body>
   <main>
     <a class="back" href="/">&larr; Back to Earth Simulator</a>
     <h1>Privacy Policy</h1>
-    <div class="updated">Last updated: July 31, 2026</div>
+    <div class="updated">Last updated: August 3, 2026</div>
 
     <p>
       Earth Simulator is a climate exploration tool. This page explains exactly what
@@ -41,22 +51,89 @@
     <h2>What we collect — only with your consent</h2>
     <p>
       When you first visit, a banner asks whether we may record your session. If you
-      accept, we collect an anonymous "session story" — a timeline of what you explored
-      during this visit:
+      accept, we collect a <strong>pseudonymous</strong> "session story" — a timeline of
+      what you explored during this visit. Rows are stored in a Supabase table named
+      <code>telemetry_events</code>. Each row has:
     </p>
     <ul>
-      <li><strong>The full text of your chat messages.</strong> Questions you type may
-        include personal context (for example, where you live or what worries you) —
-        anything you type is stored as-is.</li>
-      <li>Which countries you clicked, which map layers, years, and climate pathways
-        you viewed, and which simulations you ran.</li>
-      <li>Session metadata: a randomly generated session ID, timestamps, your browser
-        viewport size, and the page that referred you here.</li>
+      <li><strong>sessionId</strong> — a randomly generated ID for this visit only</li>
+      <li><strong>timestamp</strong> — when the event occurred</li>
+      <li><strong>event</strong> — the event type name (see table below)</li>
+      <li><strong>payload</strong> — a small JSON object with the fields listed below</li>
     </ul>
     <p>
-      This is stored in a database hosted by <strong>Supabase</strong> and is used for
-      one purpose: understanding what people are curious about so we can improve the
-      simulator. It is not used for advertising and is not sold or shared.
+      <strong>Chat text is never stored in full.</strong> For ordinary chat turns we
+      store only a truncated preview (at most 80 characters) plus the structured
+      command type and hazard event name returned by the parser. No full message
+      text is written to the telemetry database.
+    </p>
+
+    <h2>Event types and payload shapes</h2>
+    <p>
+      These are the only event names and payload fields we write when you consent:
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>event</th>
+          <th>payload</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>session_start</code></td>
+          <td><code>{ referrer, viewport }</code> — referring page URL (if any) and browser window size (e.g. <code>1280x800</code>)</td>
+        </tr>
+        <tr>
+          <td><code>session_end</code></td>
+          <td><code>{ totalEvents, durationMs }</code> — count of events in the session and how long it lasted</td>
+        </tr>
+        <tr>
+          <td><code>chapter_change</code></td>
+          <td><code>{ year, ssp }</code> — timeline chapter year and climate pathway</td>
+        </tr>
+        <tr>
+          <td><code>ssp_change</code></td>
+          <td><code>{ ssp }</code> — climate pathway you selected</td>
+        </tr>
+        <tr>
+          <td><code>layer_change</code></td>
+          <td><code>{ layerId }</code> — which map data layer you viewed</td>
+        </tr>
+        <tr>
+          <td><code>chat_query</code></td>
+          <td><code>{ textPreview, type, event }</code> — truncated preview of your message (≤80 characters), parsed command type (e.g. <code>climate_event</code>, <code>explain</code>), and hazard event name if any (e.g. <code>hurricane</code>). Not the full message.</td>
+        </tr>
+        <tr>
+          <td><code>simulation_trigger</code></td>
+          <td><code>{ type, iso, event, year }</code> — command type, country code if any, hazard event, and year from the command</td>
+        </tr>
+        <tr>
+          <td><code>support_shown</code></td>
+          <td><code>{ shown: true }</code> only — a boolean flag that the crisis support message was displayed. Never includes message content.</td>
+        </tr>
+        <tr>
+          <td><code>support_offered</code></td>
+          <td><code>{ support_offered: true }</code> only — a boolean flag that the short support footer was shown. Never includes message content.</td>
+        </tr>
+        <tr>
+          <td><code>region_click</code></td>
+          <td><code>{ iso }</code> — country code you selected on the globe</td>
+        </tr>
+        <tr>
+          <td><code>region_dwell</code></td>
+          <td><code>{ iso, durationMs }</code> — how long a country selection remained active</td>
+        </tr>
+        <tr>
+          <td><code>report_export</code></td>
+          <td><code>{ type, target }</code> — export kind and country/target code if any</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>
+      This data is used for one purpose: understanding what people are curious about
+      so we can improve the simulator. It is not used for advertising and is not sold
+      or shared.
     </p>
 
     <h2>If you decline</h2>
@@ -69,6 +146,7 @@
     <h2>What we do NOT collect</h2>
     <ul>
       <li>No account, name, email address, or phone number — there is nothing to sign up for.</li>
+      <li>No full chat message text in the telemetry database (only the ≤80-character preview described above, and never for support-path events).</li>
       <li>No precise location. We never request your device's location.</li>
       <li>No advertising trackers, no analytics cookies, no fingerprinting.</li>
       <li>No cross-session profile: each visit gets a new random session ID, and session
@@ -89,9 +167,11 @@
       server-side proxy to <strong>Anthropic</strong> (the maker of the Claude language
       model), which processes it to generate the simulator's response. This happens
       regardless of your telemetry choice — it is how the chat works — but Anthropic
-      receives only your chat messages from the current session (recent messages are
-      included with each request so replies stay coherent) and scenario context
-      (year, climate pathway), never a stored profile of you. See
+      receives only your chat messages from the current session (a rolling window of
+      recent turns is included with each request so replies stay coherent) and scenario
+      context (year, climate pathway), never a stored profile of you. That live API
+      processing is separate from the telemetry database, which does not store full
+      message text. See
       <a href="https://www.anthropic.com/legal/privacy" rel="noopener" target="_blank">Anthropic's privacy policy</a>.
     </p>
 
@@ -110,16 +190,15 @@
     <h2>Retention and deletion</h2>
     <p>
       Session stories are kept while we actively develop the simulator and are reviewed
-      only by the operator. Because sessions are anonymous, we cannot identify which
+      only by the operator. Because sessions are pseudonymous, we cannot identify which
       rows are yours after the fact; if you want a specific session removed, contact us
       with the approximate date and time of your visit and we will delete matching data.
     </p>
 
     <h2>Children</h2>
     <p>
-      Earth Simulator is an educational tool suitable for general audiences. We do not
-      knowingly collect personal information from anyone, including children; do not type
-      personal details into the chat.
+      Earth Simulator is not intended for users under 13. We do not knowingly collect
+      personal information from children; do not type personal details into the chat.
     </p>
 
     <h2>Changes</h2>

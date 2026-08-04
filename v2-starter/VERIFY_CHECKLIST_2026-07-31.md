@@ -115,7 +115,7 @@ Every one of these: on-screen numbers must be baked-data numbers with a
 ## Results — 2026-07-31 run
 
 **§1 browser checks: ALL THREE PASS on production.** Run against
-`https://chipper-faun-a051b1.netlify.app` in a Brave private window, DevTools
+`https://joenalism.netlify.app` in a Brave private window, DevTools
 console set to **All levels**, operator driving / Claude reading the screen
 (the Claude-in-Chrome extension does not support Brave — Chrome only — and
 sandbox fetches to the Netlify URL timed out, so the hybrid method was used).
@@ -640,6 +640,6 @@ correct. Either way:
 - [ ] Run a fresh `npm run build` and confirm `dist/_headers` matches
       `public/_headers` before any manual deploy.
 - [ ] Confirm the **served** header on production with
-      `curl -sI https://chipper-faun-a051b1.netlify.app | grep -i content-security`
+      `curl -sI https://joenalism.netlify.app | grep -i content-security`
       — that single command settles whether prod has `blob:` and therefore
       whether the console-clean check can pass at all.

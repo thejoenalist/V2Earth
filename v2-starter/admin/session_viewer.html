@@ -61,8 +61,10 @@
     </div>
   </div>
 
+  <!-- Vendored from @supabase/supabase-js dist/umd — no runtime CDN. -->
+  <script src="./vendor/supabase.js"></script>
   <script type="module">
-    import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+    const { createClient } = supabase;
 
     // ── Config persistence (URL + anon key are public values, not secrets;
     //    the SERVICE ROLE KEY must never be entered on this page) ──────────

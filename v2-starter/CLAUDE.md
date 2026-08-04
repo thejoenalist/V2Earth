@@ -270,8 +270,8 @@ All `.env.local` variables available locally. VS Code + Vite extension for HMR.
 
 **Deploy flow:** push to `main` → GitHub Actions validates → Netlify auto-builds and deploys.
 No manual deploy steps required.
-**Production URL:** `https://joenalism.netlify.app` (renamed 2026-07-31; previously
-`https://chipper-faun-a051b1.netlify.app`, live since 2026-07-05).
+**Production URL:** `https://joenalism.netlify.app` (live since 2026-07-05; hostname
+finalized 2026-07-31).
 
 ⚠ **Renaming the Netlify site breaks chat until the edge secret follows it.**
 `parse-scenario` sends `Access-Control-Allow-Origin: $ALLOWED_ORIGIN`; if that secret
@@ -308,7 +308,7 @@ ExportService, eject button, CSP headers, and rolling conversation history are a
 2. ~~**Data source attribution UI**~~ ✅ Built 2026-07-05: "About the data" footer link → modal (`src/ui/AttributionModal.js`) rendering `attribution.json`; textContent-only. Redeployed 2026-07-06 — CC BY 4.0 satisfied.
 3. ~~**Supabase RLS policies**~~ ✅ Verified 2026-07-05. Finding: the `telemetry_events` table did NOT exist — all telemetry inserts had been failing silently. Created via SQL editor (`id` identity PK, `"sessionId"` text, `"timestamp"` timestamptz, `event` text, `payload` jsonb, `inserted_at` timestamptz); RLS enabled; single anon INSERT-only policy. Proven over REST with the anon key: INSERT 201, SELECT returns `[]`, UPDATE/DELETE affect 0 rows. (Leftover test row: sessionId `rls-test-2026-07-05`.)
 4. ~~**Admin session viewer — auth decision**~~ ✅ Decided + built 2026-07-05: magic-link gate. `admin/session_viewer.html` rewritten — Supabase Auth `signInWithOtp` (`shouldCreateUser: false`), reads with the signed-in operator's JWT; the service role key never enters the browser (paste-key flow removed; also fixed an innerHTML XSS from telemetry chat text). Still not in `dist/`. ADMIN_SETUP completed + verified end-to-end 2026-07-06: magic-link sign-in works, Load Sessions renders real session stories via the operator JWT, and the anon key re-proven blocked (SELECT `[]`, UPDATE/DELETE 0 rows).
-5. **Cost controls** — remaining: Anthropic spend cap in the console. Done: max query length enforced in the edge function; `ALLOWED_ORIGIN` set 2026-07-05 to `https://chipper-faun-a051b1.netlify.app` (was `*`) and function redeployed.
+5. **Cost controls** — remaining: Anthropic spend cap in the console. Done: max query length enforced in the edge function; `ALLOWED_ORIGIN` set 2026-07-05 to `https://joenalism.netlify.app` (was `*`) and function redeployed.
 
 **Missing core product**
 
@@ -337,7 +337,7 @@ baked-data statistics. Committed to Cesium ion (terrain + OSM Buildings).
 - `ssp:changed` now emitted by `TimeController.setSSP()` (2026-07-04) — TelemetryService subscribed to it but it was never fired; SSP switches were missing from session stories.
 - Edge function `parse-scenario` deployed with fresh `ANTHROPIC_API_KEY`; live test 200 + valid SimulationCommand (2026-07-05).
 - `ALLOWED_ORIGIN` locked to the production Netlify URL (2026-07-05).
-- Netlify production deploy live at `https://chipper-faun-a051b1.netlify.app` (full `dist/` from `npm run build`; first attempt was index.html-only, fixed). Bundle/data/CSP headers verified via HTTP probe. Export-modal + live-chat manual checks still pending.
+- Netlify production deploy live at `https://joenalism.netlify.app` (full `dist/` from `npm run build`; first attempt was index.html-only, fixed). Bundle/data/CSP headers verified via HTTP probe. Export-modal + live-chat manual checks still pending.
 - `telemetry_events` table created + RLS verified anon INSERT-only (2026-07-05) — see launch-blocker #3.
 
 **Fixed in the 2026-07-03 audit**

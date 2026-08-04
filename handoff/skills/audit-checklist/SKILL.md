@@ -9,7 +9,10 @@ Run every check. Report each as PASS / FAIL / WARN with file:line evidence.
 Do not reason about whether a check "probably" passes — run the grep and look.
 
 First run the automated half: `npm run verify` (in `v2-starter/`). It covers
-checks marked [auto] below. Then do the manual checks.
+checks marked [auto] below. After any production client deploy (or when claiming
+a ship is live), also run `npm run verify-ship` — it compares local `SHIP_MARKERS`
+against the deployed Netlify bundle (deploy-skew tripwire; see §8). Then do the
+manual checks.
 
 ## 1. XSS / injection [manual]
 Bug class: `report.grade` was injected into `innerHTML` unescaped (fixed 2026-07-03).
@@ -74,6 +77,18 @@ bricked chat for the whole session (fixed 2026-07-03).
 - `public/data/attribution.json` exists and cites CMIP6 + World Bank (CC BY 4.0).
 - `public/data/manifest.json` has a `baked_at` timestamp.
 - No runtime fetches to external climate APIs from `src/` (baked data only).
+
+## 8. Deploy skew / verify-ship [auto]
+Bug class: support path shipped broken 2026-08-03 — edge returned `type:"support"`
+while production JS still lacked the client path. Local verify passed; only
+manual live testing caught it.
+
+- Run `npm run verify-ship` (in `v2-starter/`). Every marker in
+  `scripts/verify-ship.mjs` → `SHIP_MARKERS` that exists in local source must
+  appear in the live production bundle (`SHIP_URL`, default joenalism.netlify.app).
+- Prefer EventBus event names / URL literals as needles (survive minification).
+- When adding a client feature that must not lag the edge/API, add a `SHIP_MARKERS`
+  entry in the same change.
 
 ## Report format
 End with a table: check | status | evidence. Then a one-paragraph verdict:

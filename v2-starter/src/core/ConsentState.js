@@ -29,7 +29,7 @@ const STORAGE_KEY = 'earthsim.telemetryConsent';
 // BUMP THIS whenever privacy.html changes materially, together with its
 // "Last updated" date. Still the one approved localStorage flag (DECISIONS.md
 // amendment) — same key, single value, no personal content.
-const CONSENT_VERSION = '2026-07-31';
+const CONSENT_VERSION = '2026-08-03';
 const ACCEPTED = `accepted:${CONSENT_VERSION}`;
 
 /** @type {boolean | null} null = undecided, true = accepted, false = declined (session-only) */
