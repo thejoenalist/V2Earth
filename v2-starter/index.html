@@ -273,6 +273,54 @@
       border-color: rgba(232, 90, 74, 0.4);
     }
 
+    #chat-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 8px;
+      align-items: center;
+      transition: opacity 0.15s;
+    }
+
+    #chat-chips.is-loading {
+      opacity: 0.45;
+      pointer-events: none;
+    }
+
+    .chat-chip {
+      flex-shrink: 0;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-family: var(--font);
+      color: var(--text);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      cursor: pointer;
+      backdrop-filter: blur(8px);
+      transition: border-color 0.15s, color 0.15s, background 0.15s;
+      white-space: nowrap;
+    }
+
+    .chat-chip:hover {
+      border-color: var(--accent-dim);
+      color: var(--accent);
+    }
+
+    .chat-chip--shuffle {
+      color: var(--text-muted);
+      padding: 6px 10px;
+    }
+
+    /* Docked 380px panel: single horizontally-scrollable chip row */
+    #chat-panel.active #chat-chips {
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      overflow-y: hidden;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: thin;
+    }
+
     #chat-input-row {
       display: flex;
       gap: 8px;
@@ -749,6 +797,7 @@
   <!-- Chat panel -->
   <div id="chat-panel">
     <div id="chat-messages"></div>
+    <div id="chat-chips" aria-label="Suggested prompts"></div>
     <div id="chat-input-row">
       <textarea id="chat-input" placeholder="Ask about a climate event, region, or scenario…" rows="1"></textarea>
       <button id="chat-submit">→</button>

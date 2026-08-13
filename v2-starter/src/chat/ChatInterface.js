@@ -19,6 +19,7 @@ import { SUPPORT_MESSAGE_HTML, SUPPORT_OFFER_FOOTER_HTML } from './supportMessag
 import { getImpactStats, loadImpactData, fmtNum, fmtSigned, resolveEventAnchor } from '../data/ImpactStats.js';
 import { seaLevelHumanLine } from '../data/HumanScale.js';
 import { SIMULATION_DECISION_GRACE_MS } from '../simulation/ActiveSimulation.js';
+import { PromptChips } from '../ui/PromptChips.js';
 
 /** Escape user-supplied strings before injection into innerHTML. */
 function escapeHtml(str) {
@@ -69,6 +70,27 @@ export class ChatInterface {
     this._onDecisionRequested = (payload) => this._renderKeepClearPrompt(payload);
 
     this._wire();
+
+    // Suggested prompts — pick routes through _handleSubmit (typed-input path).
+    this._chipsEl = document.getElementById('chat-chips');
+    this._chips = this._chipsEl
+      ? new PromptChips({
+          container: this._chipsEl,
+          sessionId: this._sessionId,
+          onPick: (text) => {
+            if (this._isLoading) return;
+            if (this._input) this._input.value = text;
+            this._handleSubmit();
+          },
+        })
+      : null;
+  }
+
+  /** Sync submit + chip affordance; must run on every load start/end path. */
+  _setLoading(loading) {
+    this._isLoading = loading;
+    if (this._submit) this._submit.disabled = loading;
+    this._chipsEl?.classList.toggle('is-loading', loading);
   }
 
   // ── Wiring ────────────────────────────────────────────────────────────────
@@ -97,6 +119,10 @@ export class ChatInterface {
     EventBus.off('simulation:ejected',          this._onEjected);
     EventBus.off('simulation:compound_detected', this._onCompound);
     EventBus.off('simulation:decision_requested', this._onDecisionRequested);
+    this._chips?.destroy();
+    this._chips = null;
+    this._chipsEl?.classList.remove('is-loading');
+    this._chipsEl = null;
     // Cancel any outstanding grace timers so nothing fires after teardown.
     for (const commandId of [...this._pendingDecisions.keys()]) {
       this._resolveDecision(commandId);
@@ -110,8 +136,7 @@ export class ChatInterface {
     if (!text || this._isLoading) return;
 
     this._input.value = '';
-    this._isLoading   = true;
-    this._submit.disabled = true;
+    this._setLoading(true);
 
     // First submit: transition panel to bottom-right
     if (!this._hasSubmitted) {
@@ -136,8 +161,7 @@ export class ChatInterface {
     } catch (err) {
       loadingEl.remove();
       this._showParseError(err);
-      this._isLoading       = false;
-      this._submit.disabled = false;
+      this._setLoading(false);
       this._input?.focus();
       return;
     }
@@ -149,8 +173,7 @@ export class ChatInterface {
       this._renderSupport();
       EventBus.emit('support:shown', { shown: true });
       this._parser.commitSupport(text);
-      this._isLoading       = false;
-      this._submit.disabled = false;
+      this._setLoading(false);
       this._input?.focus();
       return;
     }
@@ -195,8 +218,7 @@ export class ChatInterface {
       this._showParseError(err);
     }
 
-    this._isLoading       = false;
-    this._submit.disabled = false;
+    this._setLoading(false);
     this._input?.focus();
   }
 
