@@ -440,6 +440,11 @@ Each of these has happened (or nearly happened) in this codebase:
    run `npm run verify-ship` (compares `SHIP_MARKERS` in local source against the
    deployed JS bundle). Add a marker for every client feature that must not lag
    the API.
+10. **Windows CRLF vs in-memory LF in byte comparisons.** Checkouts on Windows
+    get `\r\n` in files; JS string literals / imported prompt text are LF.
+    Any `includes` / equality check against an in-memory LF string must
+    normalize `\r\n` → `\n` first (see `verify-all.mjs` edge-function sync).
+    Otherwise verify false-fails while `npm run sync-prompt` reports up to date.
 
 ---
 

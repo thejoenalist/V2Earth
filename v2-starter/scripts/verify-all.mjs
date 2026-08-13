@@ -91,7 +91,9 @@ section('edge-function prompt sync');
         .replace(/\\/g, '\\\\')
         .replace(/`/g, '\\`')
         .replace(/\$\{/g, '\\${');
-      const block = targetText.slice(s + START.length, e);
+      // Normalize CRLF so Windows checkouts don't false-fail against the
+      // LF string from SCENARIO_PARSER_SYSTEM_PROMPT in memory.
+      const block = targetText.slice(s + START.length, e).replace(/\r\n/g, '\n');
       if (block.includes(escaped)) pass('edge-function prompt matches canonical prompt');
       else fail('edge-function prompt has DRIFTED — run: npm run sync-prompt && npx supabase functions deploy parse-scenario');
     }
