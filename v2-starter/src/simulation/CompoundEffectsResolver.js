@@ -62,6 +62,14 @@ const COMPOUND_MAP = {
     chatPrompt: 'The Camp Fire (2018) and Australia\'s Black Summer (2019-20) both followed multi-year drought. Drought doesn\'t just dry things out — it changes how fire behaves entirely.',
   },
 
+  'drought+power_grid_failure': {
+    label: 'Hydro Drought Blackout',
+    narrative: 'Multi-year drought collapses reservoir levels that hydropower depends on, cutting firm generation exactly when heat and irrigation demand rise. Regions that treat hydro as baseload discover the drought has already taken that capacity offline. The same climate stress that empties reservoirs is what SimulationCommand registers for power_grid_failure: drought reducing hydro output — seen across Western U.S. reservoirs and Brazil\'s 2021 hydro crisis.',
+    amplification: { generation_loss: 1.9, peak_shortage_risk: 2.2, cooling_water_stress: 1.7 },
+    newRisks: ['hydro_capacity_collapse', 'rolling_blackout_extension', 'irrigation_power_conflict'],
+    chatPrompt: 'Drought doesn\'t just raise demand — it deletes hydropower supply. When reservoirs fall, the grid loses generation that weather forecasts cannot restore overnight.',
+  },
+
   'drought+locust_swarm': {
     label: 'Agricultural Collapse',
     narrative: 'Drought-stressed crops have zero resilience against locust pressure. A single swarm of 40 billion insects consumes food for 35,000 people per day. Food system failure follows within weeks across affected regions. The 2019–2020 East Africa crisis — worst in 70 years — arrived after two consecutive years of unusual rainfall.',
@@ -79,6 +87,14 @@ const COMPOUND_MAP = {
   },
 
   // ── Heat ─────────────────────────────────────────────────────────────────
+  'blizzard+power_grid_failure': {
+    label: 'Frozen Grid',
+    narrative: 'Extreme cold spikes heating demand while freezing generation, fuel supply, and transmission that were not winterized for the event. Texas February 2021 (ERCOT) is the canonical case: natural-gas wellheads and plants iced offline as demand peaked, cascading into multi-day outages — the same climate-linked grid failure SimulationCommand cites for power_grid_failure.',
+    amplification: { mortality_risk: 3.4, heating_failure: 3.1, water_infrastructure_freeze: 2.4 },
+    newRisks: ['pipe_burst_cascade', 'carbon_monoxide_poisoning', 'generator_fuel_exhaustion', 'road_ice_isolation'],
+    chatPrompt: 'In a deep freeze, grid failure is not an inconvenience — it is a race against hypothermia. ERCOT 2021 showed how quickly winterized assumptions fail.',
+  },
+
   'heatwave+power_grid_failure': {
     label: 'Thermal Blackout',
     narrative: 'Peak demand during extreme heat trips grid capacity. Cooling centers go offline. Vulnerable populations — elderly, unhoused, infants, dialysis patients — face survivability thresholds without mechanical cooling. The 2003 European heat wave killed over 70,000 people; the 2021 Pacific Northwest heat dome killed 1,400 in a week. Both happened before widespread air conditioning.',
@@ -95,7 +111,23 @@ const COMPOUND_MAP = {
     chatPrompt: 'Drought and heat amplify each other through a feedback loop: less soil moisture → higher surface temps → more evaporation → less soil moisture.',
   },
 
+  'heatwave+wildfire': {
+    label: 'Heat-Driven Firestorm',
+    narrative: 'Extreme heat desiccates fuels in hours rather than weeks and drives plume-dominated fire behavior. The June 2021 Pacific Northwest heat dome — record temperatures across British Columbia, Washington, and Oregon — preceded the Lytton, B.C. fire that destroyed the town the day after it set Canada\'s all-time heat record (49.6 °C). Heat does not merely coincide with fire; it manufactures the fuels and the atmosphere fire needs.',
+    amplification: { fire_spread_rate: 2.6, spotting_distance: 2.0, suppression_effectiveness: 0.45 },
+    newRisks: ['town_scale_destruction', 'heat_exhaustion_evacuees', 'smoke_plus_heat_mortality'],
+    chatPrompt: 'Lytton burned the day after the heat record. Under a heat dome, the fire weather forecast and the temperature forecast become the same warning.',
+  },
+
   // ── Coastal ──────────────────────────────────────────────────────────────
+  'hurricane+power_grid_failure': {
+    label: 'Storm Blackout',
+    narrative: 'Hurricane winds and surge destroy transmission and generation while flooding cuts restoration access for weeks to months. Hurricane Maria (2017) left much of Puerto Rico without grid power for months; Katrina (2005) similarly collapsed coastal grid and pump systems across the Gulf. Without power, hospitals, water treatment, and communications fail in the same window survivors need them most.',
+    amplification: { recovery_time: 3.6, medical_facility_failure: 2.8, water_system_failure: 2.5 },
+    newRisks: ['extended_islanding', 'hospital_generator_exhaustion', 'communications_blackout', 'cold_chain_collapse'],
+    chatPrompt: 'After Maria, the outage was the disaster. Wind passes in hours; a dark grid turns every following week into a survival problem.',
+  },
+
   'hurricane+sea_level_rise': {
     label: 'Amplified Surge',
     narrative: 'Elevated baseline sea level adds directly to storm surge height. Storm tracks that historically spared inland areas now threaten them. Each centimeter of sea level rise adds directly to surge. By 2050 under SSP5-8.5, a Category 3 storm will inundate zones that only a Category 5 could reach today.',
@@ -135,6 +167,14 @@ const COMPOUND_MAP = {
     amplification: { recovery_time: 4.2, critical_service_failure: 3.6 },
     newRisks: ['sewage_system_failure', 'hospital_generator_exhaustion', 'communications_blackout', 'potable_water_crisis'],
     chatPrompt: 'Every critical infrastructure system in a modern city is a grid-dependent system. Grid failure doesn\'t just turn off lights — it turns off civilization.',
+  },
+
+  'power_grid_failure+wildfire': {
+    label: 'Grid and Fire Feedback',
+    narrative: 'Energized lines spark ignitions in dry fuels, and once fire is running it destroys the same corridors utilities need for restoration. PG&E\'s equipment was found to have ignited California\'s Camp Fire (2018), which destroyed Paradise; afterward, Public Safety Power Shutoffs (PSPS) intentionally de-energized lines during extreme fire weather — trading blackout risk for ignition risk. The grid and the fire become one coupled system.',
+    amplification: { ignition_risk: 2.4, restoration_delay: 2.7, evacuation_difficulty: 1.8 },
+    newRisks: ['psps_deenergization', 'line_ignition', 'fire_damage_to_transmission', 'smoke_plus_outage'],
+    chatPrompt: 'Camp Fire and PSPS are two sides of the same failure: leave lines energized and they can start the fire; shut them off and the community goes dark in the heat.',
   },
 
   // ── Conflict + climate ────────────────────────────────────────────────────
