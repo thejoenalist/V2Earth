@@ -232,11 +232,12 @@
         width   0.45s cubic-bezier(0.4, 0, 0.2, 1);
     }
 
-    /* After first prompt: slide to bottom-right */
+    /* After first prompt: slide to bottom-right.
+       520px fits 4 chips + shuffle on one row without a side scrollbar. */
     #chat-panel.active {
-      left: calc(100vw - 400px);
+      left: calc(100vw - 540px);
       transform: none;
-      width: 380px;
+      width: 520px;
     }
 
     #chat-messages {
@@ -312,13 +313,10 @@
       padding: 6px 10px;
     }
 
-    /* Docked 380px panel: single horizontally-scrollable chip row */
+    /* Docked panel: single chip row (panel width sized to avoid overflow-x) */
     #chat-panel.active #chat-chips {
       flex-wrap: nowrap;
-      overflow-x: auto;
-      overflow-y: hidden;
-      -webkit-overflow-scrolling: touch;
-      scrollbar-width: thin;
+      overflow: hidden;
     }
 
     #chat-input-row {

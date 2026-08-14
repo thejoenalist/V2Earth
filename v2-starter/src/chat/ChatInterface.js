@@ -337,13 +337,13 @@ export class ChatInterface {
     card.style.background  = 'rgba(8,28,44,0.92)';
 
     const title = document.createElement('div');
-    title.style.cssText = 'font-weight:600; color:#7dd3fc; margin-bottom:8px;';
+    title.style.cssText = 'font-weight:600; color:#7dd3fc; margin-bottom:8px; font-size:15px;';
     title.textContent = '📊 By the numbers';
     card.appendChild(title);
 
     const addRow = (label, value, basis, source) => {
       const row = document.createElement('div');
-      row.style.cssText = 'display:flex; justify-content:space-between; gap:12px; margin:3px 0; font-size:12px;';
+      row.style.cssText = 'display:flex; justify-content:space-between; gap:12px; margin:3px 0; font-size:14px;';
       const l = document.createElement('span');
       l.style.color = '#9fc7dd';
       l.textContent = basis ? `${label} · ${basis}` : label;
@@ -354,7 +354,7 @@ export class ChatInterface {
       card.appendChild(row);
       if (source) {
         const s = document.createElement('div');
-        s.style.cssText = 'font-size:10px; color:#5a8a9a; margin:-1px 0 4px;';
+        s.style.cssText = 'font-size:12px; color:#5a8a9a; margin:-1px 0 4px;';
         s.textContent = source;
         card.appendChild(s);
       }
@@ -371,7 +371,7 @@ export class ChatInterface {
       const human = seaLevelHumanLine({ riseM: stats.raw?.seaLevelRiseM, anchorCity });
       if (human) {
         const h = document.createElement('div');
-        h.style.cssText = 'margin-top:8px; padding:6px 8px; border-radius:6px; background:rgba(125,211,252,0.08); color:#bfe3f5; font-size:12px;';
+        h.style.cssText = 'margin-top:8px; padding:6px 8px; border-radius:6px; background:rgba(125,211,252,0.08); color:#bfe3f5; font-size:14px;';
         h.textContent = `🌊 ${human}`;
         card.appendChild(h);
       }
@@ -379,7 +379,7 @@ export class ChatInterface {
 
     if (stats.nearestCities?.length) {
       const cities = document.createElement('div');
-      cities.style.cssText = 'margin-top:8px; font-size:11px; color:#9fc7dd;';
+      cities.style.cssText = 'margin-top:8px; font-size:13px; color:#9fc7dd;';
       cities.textContent = 'Nearest: ' + stats.nearestCities
         .map((c) => `${c.name} (${Math.round(c.distanceKm)} km)`).join(' · ');
       card.appendChild(cities);
@@ -387,7 +387,7 @@ export class ChatInterface {
 
     for (const caveat of (stats.caveats ?? [])) {
       const cv = document.createElement('div');
-      cv.style.cssText = 'margin-top:6px; font-size:10.5px; color:#8a9aa5; font-style:italic;';
+      cv.style.cssText = 'margin-top:6px; font-size:12px; color:#8a9aa5; font-style:italic;';
       cv.textContent = `⚠ ${caveat}`;
       card.appendChild(cv);
     }
@@ -850,9 +850,9 @@ export class ChatInterface {
     el.style.cssText = `
       padding: 10px 14px;
       border-radius: 16px;
-      font-size: 13px;
+      font-size: 15px;
       line-height: 1.55;
-      max-width: 90%;
+      max-width: 100%;
       white-space: pre-wrap;
       background: ${role === 'user' ? 'rgba(74,168,232,0.15)' : role === 'system' ? 'rgba(255,255,255,0.04)' : 'rgba(8,20,32,0.9)'};
       border: 1px solid ${role === 'user' ? 'rgba(74,168,232,0.3)' : role === 'system' ? 'rgba(255,255,255,0.1)' : 'rgba(80,160,220,0.12)'};
