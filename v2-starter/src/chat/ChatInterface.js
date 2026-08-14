@@ -16,9 +16,12 @@
 import { EventBus } from '../core/EventBus.js';
 import { ScenarioParser } from './ScenarioParser.js';
 import { SUPPORT_MESSAGE_HTML, SUPPORT_OFFER_FOOTER_HTML } from './supportMessage.js';
+import { EVENT_TYPES } from './SimulationCommand.js';
 import { getImpactStats, loadImpactData, fmtNum, fmtSigned, resolveEventAnchor } from '../data/ImpactStats.js';
 import { seaLevelHumanLine } from '../data/HumanScale.js';
 import { SIMULATION_DECISION_GRACE_MS } from '../simulation/ActiveSimulation.js';
+import { getStackablePartners } from '../simulation/CompoundEffectsResolver.js';
+import { isoDisplayName } from '../core/ISONormalizer.js';
 import { PromptChips } from '../ui/PromptChips.js';
 
 /** Escape user-supplied strings before injection into innerHTML. */
@@ -292,7 +295,12 @@ export class ChatInterface {
 
     // Real baked statistics for hazard events (VISUAL_UPGRADE_PLAN F2) — numbers
     // come from climate.json/worldbank.json/cities.json, never the LLM narrative.
-    if (type === 'climate_event') this._renderImpactStats(command);
+    // Then offer a path from impact → agency (same timing pattern as _offerQuiz).
+    // Support/crisis never reaches here (_handleSubmit short-circuits type:support).
+    if (type === 'climate_event') {
+      this._renderImpactStats(command);
+      setTimeout(() => this._offerNextStep(command), 1200);
+    }
 
     // Default
     if (narrative.learned) this._addMessage('assistant', `📊 ${narrative.learned}`);
@@ -709,6 +717,77 @@ export class ChatInterface {
 
     offerEl.textContent = '🌱 Want to put your mitigation strategy to the test?';
     offerEl.appendChild(btn);
+    this._messages?.appendChild(offerEl);
+    this._messages?.scrollTo({ top: this._messages.scrollHeight, behavior: 'smooth' });
+  }
+
+  /**
+   * After a climate_event: offer local_action / optional compound stack / resilience_plan.
+   * Stack fork only appears when getStackablePartners finds a defined COMPOUND_MAP pair.
+   * @param {import('./SimulationCommand.js').SimulationCommand} command
+   */
+  _offerNextStep(command) {
+    // Belt-and-suspenders: never attach agency forks to a crisis interstitial.
+    if (command?.type === 'support') return;
+
+    const eventType = command.event ?? command.params?.eventType ?? null;
+    const eventLabel = (eventType && EVENT_TYPES[eventType]?.label) || eventType || 'this hazard';
+    const place = isoDisplayName(command.target) || command.target || 'this place';
+
+    const partners = getStackablePartners(eventType);
+    const partnerEvent = partners[0] ?? null;
+    const partnerLabel = partnerEvent
+      ? (EVENT_TYPES[partnerEvent]?.label ?? partnerEvent)
+      : null;
+
+    const offerEl = this._createMessageEl('assistant');
+    offerEl.style.background = 'rgba(74,168,232,0.1)';
+    offerEl.style.borderColor = 'rgba(74,168,232,0.35)';
+    offerEl.style.color = '#a8d8f0';
+
+    const prompt = document.createElement('div');
+    prompt.textContent = 'What do you want to do next?';
+    offerEl.appendChild(prompt);
+
+    const row = document.createElement('div');
+    row.className = 'chat-next-step';
+
+    /** @param {string} label @param {string} text @param {string} forkId */
+    const addFork = (label, text, forkId) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'chat-chip chat-chip--next-step';
+      btn.textContent = label;
+      btn.addEventListener('click', () => {
+        offerEl.remove();
+        EventBus.emit('chat:next_step', { forkId, sessionId: this._sessionId });
+        if (this._input) this._input.value = text;
+        this._handleSubmit();
+      });
+      row.appendChild(btn);
+    };
+
+    addFork(
+      'What can I do about this?',
+      `What can I do about ${eventLabel} in ${place}?`,
+      'local_action',
+    );
+
+    if (partnerEvent && partnerLabel) {
+      addFork(
+        `Add a ${partnerLabel}`,
+        `Now add a ${partnerLabel} on top of this ${eventLabel} in ${place}`,
+        `stack_${partnerEvent}`,
+      );
+    }
+
+    addFork(
+      'Build a resilience plan',
+      `Build a resilience plan for ${place} against ${eventLabel}`,
+      'resilience_plan',
+    );
+
+    offerEl.appendChild(row);
     this._messages?.appendChild(offerEl);
     this._messages?.scrollTo({ top: this._messages.scrollHeight, behavior: 'smooth' });
   }

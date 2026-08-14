@@ -313,6 +313,25 @@
       padding: 6px 10px;
     }
 
+    /* Post-climate_event agency forks (local_action / stack / resilience_plan) */
+    .chat-next-step {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .chat-chip--next-step {
+      border-color: rgba(74, 168, 232, 0.45);
+      color: #7ec8e3;
+      background: rgba(74, 168, 232, 0.12);
+    }
+
+    .chat-chip--next-step:hover {
+      border-color: var(--accent-dim);
+      color: var(--accent);
+    }
+
     /* Docked panel: single chip row (panel width sized to avoid overflow-x) */
     #chat-panel.active #chat-chips {
       flex-wrap: nowrap;

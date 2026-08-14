@@ -93,6 +93,8 @@ export class TelemetryService {
     EventBus.on('chat:query',        (payload)       => this._log('chat_query', sanitizeChatQueryPayload(payload)));
     // Chip pick: promptId only — the following chat_query row carries the truncated text.
     EventBus.on('chat:chip',         ({ promptId })  => this._log('chip_click', { promptId: promptId ?? null }));
+    // Next-step forks after climate_event: authored forkId only (no free text).
+    EventBus.on('chat:next_step',    ({ forkId })    => this._log('next_step_click', { forkId: forkId ?? null }));
     EventBus.on('simulation:requested', (cmd)        => this._log('simulation_trigger', { type: cmd.type, iso: cmd.target, event: cmd.event, year: cmd.params?.year }));
     // Support path: boolean flag only — never message content.
     EventBus.on('support:shown',     ()              => this._log('support_shown', { shown: true }));

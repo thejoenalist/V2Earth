@@ -68,6 +68,7 @@ export const EventBus = {
  * simulation:complete  { commandId: string, eventType?: string|null }
  * chat:query           { textPreview: string(≤80), commandType, event, sessionId }
  * chat:chip            { promptId: string, sessionId: string|null }  — suggested-prompt pick; Telemetry logs promptId only
+ * chat:next_step       { forkId: string, sessionId: string|null }  — post-climate_event agency fork; Telemetry logs forkId only
  * support:shown        { shown: true }  — crisis carve-out; no message content
  * support:offered      { support_offered: true }  — boolean only; no content
  * session:start        { sessionId: string }
