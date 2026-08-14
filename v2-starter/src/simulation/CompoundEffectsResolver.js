@@ -237,6 +237,30 @@ const COMPOUND_MAP = {
   },
 };
 
+/**
+ * Event types that form a DEFINED pair with `eventType` in COMPOUND_MAP.
+ * Suggestions sourced here can never miss resolve() — every returned partner
+ * produces a compound payoff. Self-maintains as pairs are added.
+ *
+ * Pair keys are alphabetically sorted (same convention as resolve()).
+ * Triple keys are ignored — this helper is for single-event stack nudges.
+ *
+ * @param {string|null|undefined} eventType
+ * @returns {string[]}
+ */
+export function getStackablePartners(eventType) {
+  if (!eventType || typeof eventType !== 'string') return [];
+  const partners = new Set();
+  for (const key of Object.keys(COMPOUND_MAP)) {
+    const parts = key.split('+');
+    if (parts.length !== 2) continue;
+    const [a, b] = parts;
+    if (a === eventType) partners.add(b);
+    else if (b === eventType) partners.add(a);
+  }
+  return [...partners].sort();
+}
+
 export class CompoundEffectsResolver {
   /**
    * @param {string[]} activeEvents — event types currently in the simulation stack
