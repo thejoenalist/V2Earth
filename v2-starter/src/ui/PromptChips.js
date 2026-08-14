@@ -11,6 +11,11 @@
  * City chips draw ONLY from FLAGSHIP_METROS (InundationGeodata). A suggested
  * prompt is a promise that the result is worth seeing — the generic ellipse is
  * an honest fallback, not a demo. Users can still type any city in the input.
+ *
+ * That metro rule applies only to chips that name a city. Country / region /
+ * non-place chips (e.g. "Wildfire · Australia", "Jump to 2100") are
+ * discoverability entry points, not geodata demos — do not hold them to
+ * FLAGSHIP_METROS.
  */
 
 import { EventBus } from '../core/EventBus.js';
