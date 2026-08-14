@@ -57,18 +57,16 @@ const IDLE_PROMPTS = Object.freeze(/** @type {ChipPrompt[]} */ ([
   { id: 'idle-explain-ssp',     label: 'Explain SSPs',             text: 'Explain the difference between SSP2-4.5 and SSP5-8.5' },
 ]));
 
-/** Follow-ups once a simulation is active — compounds + layering. */
+/**
+ * ACTIVE pool — complement to post-climate_event next-step forks only.
+ * Forks already cover local_action, stacking another event, and resilience_plan.
+ * Do NOT add those intents here (avoids two competing "what next" rows ~1.2s apart).
+ * Keep SSP comparison, timeline jumps, and escape/reset only.
+ */
 const ACTIVE_PROMPTS = Object.freeze(/** @type {ChipPrompt[]} */ ([
-  { id: 'active-add-drought',   label: 'Add drought',              text: 'Now layer a drought on top of this' },
-  { id: 'active-add-heat',      label: 'Add heatwave',             text: 'Add a heatwave to this scenario' },
-  { id: 'active-add-slr',       label: 'Add sea level rise',       text: 'What if sea level rise compounds this?' },
-  { id: 'active-add-fire',      label: 'Add wildfire',             text: 'Stack a wildfire on this' },
-  { id: 'active-add-grid',      label: 'Add grid failure',         text: 'What if the power grid fails during this?' },
-  { id: 'active-add-flood',     label: 'Add flood',                text: 'Add flooding on top of this event' },
-  { id: 'active-compare',       label: 'Compare SSP paths',        text: 'Compare this under SSP2-4.5 versus SSP5-8.5' },
-  { id: 'active-jump-2100',     label: 'Jump to 2100',             text: 'Jump this scenario to 2100' },
-  { id: 'active-local',         label: 'What can I do here?',      text: 'What can someone living here actually do about this?' },
-  { id: 'active-plan',          label: 'Resilience plan',          text: 'Build a resilience plan for this hazard and place' },
+  { id: 'active-compare',       label: 'Compare SSP paths',        text: 'Compare SSP2-4.5 versus SSP5-8.5' },
+  { id: 'active-jump-2050',     label: 'Jump to 2050',             text: 'Take me to the year 2050' },
+  { id: 'active-jump-2100',     label: 'Jump to 2100',             text: 'Take me to the year 2100' },
   { id: 'active-clear',         label: 'Start over',               text: 'Forget that — start over with something different' },
 ]));
 
