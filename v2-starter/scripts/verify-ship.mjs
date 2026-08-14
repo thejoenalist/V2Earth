@@ -41,6 +41,7 @@ const DEPLOY_MARKERS = [
   { id: 'support:shown', needle: 'support:shown' },
   { id: 'findahelpline.com', needle: 'findahelpline.com' },
   { id: 'VALID_TYPES support', needle: 'empowerment_quiz","support' },
+  { id: 'chips', needle: 'chip_click' },
 ];
 
 const SKIP_DIR = new Set([
@@ -354,8 +355,13 @@ function pickBundleUrl(html) {
     );
 
   const markers = [
-    { id: 'support:shown', needle: 'support:shown', localOk: localJoined.includes('support:shown') },
-    { id: 'findahelpline.com', needle: 'findahelpline.com', localOk: localJoined.includes('findahelpline.com') },
+    ...DEPLOY_MARKERS
+      .filter((m) => m.id !== 'VALID_TYPES support')
+      .map((m) => ({
+        id: m.id,
+        needle: m.needle,
+        localOk: localJoined.includes(m.needle),
+      })),
     {
       id: 'VALID_TYPES support',
       needle: null, // special
