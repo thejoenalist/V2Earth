@@ -730,14 +730,17 @@ export class ChatInterface {
     // Belt-and-suspenders: never attach agency forks to a crisis interstitial.
     if (command?.type === 'support') return;
 
+    // Parse-scenario is stateless — every fork prompt must carry concrete event
+    // + place nouns. No demonstrative fallbacks ("this hazard", "this place").
     const eventType = command.event ?? command.params?.eventType ?? null;
-    const eventLabel = (eventType && EVENT_TYPES[eventType]?.label) || eventType || 'this hazard';
-    const place = isoDisplayName(command.target) || command.target || 'this place';
+    const eventLabel = eventType ? EVENT_TYPES[eventType]?.label : null;
+    const place = isoDisplayName(command.target) || command.target || null;
+    if (!eventLabel || !place) return;
 
     const partners = getStackablePartners(eventType);
     const partnerEvent = partners[0] ?? null;
     const partnerLabel = partnerEvent
-      ? (EVENT_TYPES[partnerEvent]?.label ?? partnerEvent)
+      ? (EVENT_TYPES[partnerEvent]?.label ?? null)
       : null;
 
     const offerEl = this._createMessageEl('assistant');
@@ -768,7 +771,7 @@ export class ChatInterface {
     };
 
     addFork(
-      'What can I do about this?',
+      `What can I do about ${eventLabel}?`,
       `What can I do about ${eventLabel} in ${place}?`,
       'local_action',
     );
@@ -776,7 +779,7 @@ export class ChatInterface {
     if (partnerEvent && partnerLabel) {
       addFork(
         `Add a ${partnerLabel}`,
-        `Now add a ${partnerLabel} on top of this ${eventLabel} in ${place}`,
+        `Now add a ${partnerLabel} on top of the ${eventLabel} in ${place}`,
         `stack_${partnerEvent}`,
       );
     }
