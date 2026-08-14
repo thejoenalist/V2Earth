@@ -307,6 +307,16 @@ export async function getImpactStats({ eventType, iso, year, ssp, center = null 
         fmtSigned(climate.temperature_anomaly_c, 1, ' °C'), 'vs 1995–2014 baseline', climateSource(ssp));
       break;
     }
+    case 'wet_bulb_exceedance': {
+      // No baked wet-bulb field — heat_days_gt35c is an air-temp proxy only.
+      if (climate?.heat_days_gt35c != null) {
+        headline = { label: 'Days over 35 °C (air temp)', value: fmtNum(climate.heat_days_gt35c, 0),
+          basis: `proxy for survivability stress, ${year}`, source: climateSource(ssp) };
+      }
+      caveats.push('No baked wet-bulb projection — days >35 °C air temperature is a proxy indicator, not Tw.');
+      caveats.push('Above ~35 °C wet-bulb, a healthy human in shade with unlimited water cannot shed heat.');
+      break;
+    }
     case 'drought': {
       if (climate?.drought_index != null) {
         headline = { label: 'Drought index', value: fmtNum(climate.drought_index, 2),

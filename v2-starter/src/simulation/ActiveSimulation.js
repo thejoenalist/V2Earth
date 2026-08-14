@@ -1436,23 +1436,27 @@ export class ActiveSimulation {
 
   // ═══════════════════════════════════════════════════════════════════════════
   // M4: Heatwave  (atmospheric-shimmer)
-  // PostProcessStage heat shimmer + pulsing red-orange ground overlay
+  // PostProcessStage heat shimmer + pulsing ground overlay.
+  // wet_bulb_exceedance reuses this strategy with a survivability variant
+  // (cooler→lethal palette + threshold framing; no fabricated Tw number).
   // ═══════════════════════════════════════════════════════════════════════════
 
   async _renderHeatwave() {
+    const survivability = this.eventType === 'wet_bulb_exceedance';
     const { lon, lat } = this._getCenter();
     const mag       = Math.max(1, Math.min(5, this.command.params?.magnitude ?? 3));
     const radius    = 300_000 + mag * 100_000;
 
     // Visual intensity ref — seeded from parser magnitude, then re-driven by
-    // the BAKED temperature anomaly once ImpactStats loads below (the same
-    // rule-#4 tightening as the drought-fill fix, 2026-07-13): shimmer/ring
-    // strength reads as severity, so severity must come from baked data, not
-    // the LLM. mag keeps sizing the footprint (radius) only.
-    // Floor at 0.45: the shimmer's distortion coefficients only become
-    // perceptible around there — a pure anomaly mapping without the floor made
-    // 2025 heatwaves invisible (regression caught on the 2026-07-16 eyeball).
+    // baked data once ImpactStats loads (rule #4). mag sizes the footprint only.
+    // Floor at 0.45 so the shimmer stays perceptible at near-term chapters.
     const intensityRef = { val: Math.max(0.45, mag / 5) };
+
+    // Palette: heatwave = warm red/orange; wet-bulb = cooler→lethal violet
+    // so stacked heatwave + wet_bulb stay distinguishable at a glance.
+    const groundCss  = survivability ? '#7c3aed' : '#ef4444';
+    const ringCss    = survivability ? '#e879f9' : '#fca5a5';
+    const labelCss   = survivability ? '#e9d5ff' : '#fca5a5';
 
     // Heat shimmer PostProcessStage (global scene effect)
     const shimmer = this.viewer.scene.postProcessStages.add(
@@ -1461,6 +1465,7 @@ export class ActiveSimulation {
         fragmentShader: `
           uniform sampler2D colorTexture;
           uniform float intensity;
+          uniform float lethalMode;
           in vec2 v_textureCoordinates;
           // NOTE: do NOT declare out_FragColor — Cesium injects the
           // declaration into post-process shaders; declaring it again is a
@@ -1478,17 +1483,25 @@ export class ActiveSimulation {
 
             vec4 color = texture(colorTexture, clamp(uv, 0.001, 0.999));
 
-            // Warm tint
-            color.r = min(1.0, color.r + 0.042 * intensity);
-            color.g = max(0.0, color.g - 0.007 * intensity);
-            color.b = max(0.0, color.b - 0.016 * intensity);
+            if (lethalMode > 0.5) {
+              // Cooler→lethal: push magenta/violet, pull green (not warm red)
+              color.r = min(1.0, color.r + 0.028 * intensity);
+              color.g = max(0.0, color.g - 0.022 * intensity);
+              color.b = min(1.0, color.b + 0.038 * intensity);
+            } else {
+              // Warm tint
+              color.r = min(1.0, color.r + 0.042 * intensity);
+              color.g = max(0.0, color.g - 0.007 * intensity);
+              color.b = max(0.0, color.b - 0.016 * intensity);
+            }
 
             out_FragColor = color;
           }
         `,
-        // Function uniform: re-reads the ref each frame, so the strength
-        // switches to the baked-anomaly value as soon as stats load.
-        uniforms: { intensity: () => intensityRef.val },
+        uniforms: {
+          intensity: () => intensityRef.val,
+          lethalMode: survivability ? 1.0 : 0.0,
+        },
       })
     );
     this._track(shimmer);
@@ -1499,7 +1512,7 @@ export class ActiveSimulation {
     // targets (e.g. sub-national or ocean-region heatwaves).
     const pulsingHeat = new Cesium.ColorMaterialProperty(
       new Cesium.CallbackProperty(() =>
-        Cesium.Color.fromCssColorString('#ef4444')
+        Cesium.Color.fromCssColorString(groundCss)
           .withAlpha(0.07 + Math.sin(this._elapsed() * 2) * 0.035),
         false));
 
@@ -1556,7 +1569,7 @@ export class ActiveSimulation {
           outline: true,
           outlineColor: new Cesium.CallbackProperty(() => {
             const t = ((this._elapsed() * 0.28 + phase) % 1);
-            return Cesium.Color.fromCssColorString('#fca5a5')
+            return Cesium.Color.fromCssColorString(ringCss)
               .withAlpha((1 - t) * 0.42 * intensityRef.val);
           }, false),
           outlineWidth: 1.5,
@@ -1567,13 +1580,12 @@ export class ActiveSimulation {
 
     // ── Label reads BAKED data (VISUAL_UPGRADE_PLAN §3.4) ──
     // heat_days_gt35c + temperature_anomaly_c are already in climate.json;
-    // the old `mag × 2.5 °C` label was the exact fabricated-stat failure mode
-    // CLAUDE.md warns about. Falls back to an anomaly-free label if baked data
-    // is missing — never back to a synthesized number.
+    // wet-bulb never invents a Tw figure — only the air-temp proxy + framing.
     let stats = null;
     try {
       stats = await getImpactStats({
-        eventType: 'heatwave', iso: this.command.target,
+        eventType: survivability ? 'wet_bulb_exceedance' : 'heatwave',
+        iso: this.command.target,
         year: this.year, ssp: this.ssp, center: { lon, lat },
       });
     } catch (_) { /* label falls back below */ }
@@ -1582,31 +1594,38 @@ export class ActiveSimulation {
     const anomaly  = stats?.raw?.tempAnomalyC;
     const heatDays = stats?.raw?.heatDaysGt35c;
 
-    // Baked anomaly modulates the visual intensity over a PERCEPTIBLE band:
-    // 0.45 (any heatwave — the effect must announce the event the user chose,
-    // like the hurricane's Cat-N spiral) → 1.0 at ~+4.5 °C (late-century
-    // SSP5-8.5). The severity ORDERING is baked-data-driven (rule #4); the
-    // baseline is scenario framing, not a statistic. A pure anomaly/4 mapping
-    // was tried first and made 2025 heatwaves invisible (2026-07-16 eyeball).
-    // Missing baked data → the mag seed stays (decoration-only fallback,
-    // mirroring the label's own fallback).
+    // Baked anomaly modulates visual intensity over a perceptible band
+    // (same floor/ceiling as heatwave). Missing data → mag seed stays.
     if (anomaly != null) {
       intensityRef.val = 0.45 + 0.55 * Math.min(1, Math.max(0, anomaly / 4.5));
+    } else if (survivability && heatDays != null) {
+      // No anomaly: order intensity by heat-day count (proxy only, not Tw).
+      intensityRef.val = 0.45 + 0.55 * Math.min(1, Math.max(0, heatDays / 120));
     }
 
-    const lines = ['Heatwave'];
-    if (anomaly != null) {
-      lines[0] = `Heatwave  ${anomaly >= 0 ? '+' : ''}${anomaly.toFixed(1)}°C anomaly (CMIP6 ${this.ssp})`;
-    }
-    if (heatDays != null) {
-      lines.push(`${Math.round(heatDays)} days over 35 °C per year by ${this.year}`);
+    const lines = [];
+    if (survivability) {
+      lines.push('Survivability threshold');
+      lines.push('Above ~35 °C wet-bulb, shade + water cannot cool a healthy human');
+      if (heatDays != null) {
+        lines.push(
+          `${Math.round(heatDays)} days over 35 °C air temp/yr by ${this.year} (CMIP6 ${this.ssp}) — proxy, not Tw`);
+      }
+    } else {
+      lines.push('Heatwave');
+      if (anomaly != null) {
+        lines[0] = `Heatwave  ${anomaly >= 0 ? '+' : ''}${anomaly.toFixed(1)}°C anomaly (CMIP6 ${this.ssp})`;
+      }
+      if (heatDays != null) {
+        lines.push(`${Math.round(heatDays)} days over 35 °C per year by ${this.year}`);
+      }
     }
     const anchorCity = stats?.nearestCities?.[0];
     if (anchorCity) {
       lines.push(this._cityAnchorLine(anchorCity));
     }
 
-    this._addStatLabel(lon, lat + radius / 111_000 + 1.5, lines.join('\n'), '#fca5a5');
+    this._addStatLabel(lon, lat + radius / 111_000 + 1.5, lines.join('\n'), labelCss);
 
     this._addPostRenderListener(() => {
       if (!this._destroyed) this.viewer.scene.requestRender();
@@ -1772,7 +1791,7 @@ export class ActiveSimulation {
     //   local    — everything else (default; a modest ellipse never over-claims)
     const NATIONAL = new Set([
       'epidemic_outbreak', 'power_grid_failure', 'infrastructure_cascade',
-      'crop_failure', 'wet_bulb_exceedance', 'permafrost_thaw', 'blizzard',
+      'crop_failure', 'permafrost_thaw', 'blizzard',
       'wildfire_smoke', 'compound_fire_weather', 'dust_storm', 'locust_swarm',
     ]);
     const OCEAN = new Set([

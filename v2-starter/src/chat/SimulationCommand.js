@@ -292,7 +292,7 @@ export const EVENT_TYPES = Object.freeze({
   ocean_acidification:    { status: 'noted',  label: 'Ocean Acidification',                                          render: 'tbd' },
   glacial_lake_outburst:  { status: 'noted',  label: 'Glacial Lake Outburst Flood (GLOF)',                           render: 'tbd' },
   compound_fire_weather:  { status: 'noted',  label: 'Compound Fire Weather (Drought + Heat + Wind)',                 render: 'tbd' },
-  wet_bulb_exceedance:    { status: 'noted',  label: 'Wet-Bulb Temperature Exceedance / Survivability Threshold',    render: 'tbd' },
+  wet_bulb_exceedance:    { status: 'noted',  label: 'Wet-Bulb Temperature Exceedance / Survivability Threshold',    render: 'atmospheric-shimmer' },
   ice_sheet_collapse:     { status: 'noted',  label: 'Ice Sheet Collapse (Greenland / West Antarctic)',               render: 'tbd' },
   amoc_slowdown:          { status: 'noted',  label: 'AMOC Slowdown / Ocean Circulation Disruption',                 render: 'tbd' },
   sinkhole:               { status: 'noted',  label: 'Sinkhole / Karst Collapse',                                    render: 'tbd' },
