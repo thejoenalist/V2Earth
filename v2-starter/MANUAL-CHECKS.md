@@ -24,9 +24,17 @@ before the model call. Symptom: immediate generic chat failure, ~31 ms CPU,
 no exception in Supabase logs. That is the origin check working correctly.
 Do **not** add the webview origin to the allowlist to make in-IDE testing work.
 
+**Use `npm run dev` (port 5173), not `npm run preview` (port 4173).**
+The edge allowlist includes `http://localhost:5173`; it does **not** include
+`http://localhost:4173`. CORS treats different ports as different origins, so
+preview fails the preflight (`Access-Control-Allow-Origin` missing) and the UI
+shows a generic parse / "Failed to fetch" that looks like an app bug. Leave
+4173 off the allowlist — production-bundle eyeballs belong on the live Netlify
+URL after push. Do not widen the edge allowlist just to serve local preview.
+
 **Before starting an eyeball pass:** confirm the page's loaded JS bundle matches
-`dist/assets/` (DevTools → Network, or View Source → `script`/`module` href).
-A stale `vite preview` or cached tab can serve yesterday's hash while `src/`
-already has today's fix — two separate environment traps in one session cost
-more time than the features did. If they diverge, rebuild and hard-refresh
-(or restart preview) before testing.
+`dist/assets/` when testing a production build (live Netlify, or preview only
+after an intentional allowlist change). In **dev** (`5173`), Vite serves source
+directly — the hash check is moot. A stale `vite preview` or cached tab can
+still serve yesterday's hash while `src/` already has today's fix. If they
+diverge, rebuild and hard-refresh (or restart the server) before testing.
