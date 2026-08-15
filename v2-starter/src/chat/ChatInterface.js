@@ -57,9 +57,12 @@ export class ChatInterface {
     this._pendingDecisions = new Map();
 
     // Bound EventBus handlers — stored so destroy() can remove them
+    /** @type {string[]} */
+    this._activeStack = [];
     this._onStackChanged = ({ stack }) => {
+      this._activeStack = Array.isArray(stack) ? stack.slice() : [];
       if (this._ejectBtn) {
-        this._ejectBtn.style.display = stack.length > 0 ? 'flex' : 'none';
+        this._ejectBtn.style.display = this._activeStack.length > 0 ? 'flex' : 'none';
       }
     };
     this._onEjected = () => {
@@ -738,7 +741,13 @@ export class ChatInterface {
     if (!eventLabel || !place) return;
 
     const partners = getStackablePartners(eventType);
-    const partnerEvent = partners[0] ?? null;
+    // Never nudge a stack of an event already on the globe (includes the
+    // event that just rendered — "Add drought" on a drought is nonsense).
+    const onStack = new Set([
+      ...this._activeStack,
+      ...(eventType ? [eventType] : []),
+    ]);
+    const partnerEvent = partners.find((p) => !onStack.has(p)) ?? null;
     const partnerLabel = partnerEvent
       ? (EVENT_TYPES[partnerEvent]?.label ?? null)
       : null;
