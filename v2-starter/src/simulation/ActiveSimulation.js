@@ -171,6 +171,33 @@ export class ActiveSimulation {
     return obj;
   }
 
+  /**
+   * Paired ellipse axes that share ONE this._elapsed() sample per Cesium frame.
+   * Independent CallbackProperty reads of _elapsed() for major vs minor race:
+   * time advances between evaluations and semiMinorAxis can briefly exceed
+   * semiMajorAxis → Cesium DeveloperError that kills the render loop.
+   *
+   * @param {(elapsedSec: number) => { major: number, minor: number }} compute
+   * @returns {{ semiMajorAxis: import('cesium').CallbackProperty, semiMinorAxis: import('cesium').CallbackProperty }}
+   */
+  _ellipseAxisPair(compute) {
+    const slot = { frame: -1, major: 1, minor: 1 };
+    const sample = () => {
+      const frame = this.viewer.scene.frameState.frameNumber;
+      if (slot.frame !== frame) {
+        slot.frame = frame;
+        const { major, minor } = compute(this._elapsed());
+        slot.major = major;
+        slot.minor = minor;
+      }
+      return slot;
+    };
+    return {
+      semiMajorAxis: new Cesium.CallbackProperty(() => sample().major, false),
+      semiMinorAxis: new Cesium.CallbackProperty(() => sample().minor, false),
+    };
+  }
+
   /** Register a postRender listener and track its removal.
    *  Cesium.Event.addEventListener returns void — removal is via removeEventListener. */
   _addPostRenderListener(fn) {
@@ -930,17 +957,16 @@ export class ActiveSimulation {
     // 4 expanding wave rings
     for (let i = 0; i < 4; i++) {
       const phase = i * 0.25;
+      const axes = this._ellipseAxisPair((elapsed) => {
+        const t = ((elapsed * 0.35 + phase) % 1);
+        const major = floodR * (0.25 + t * 0.9);
+        return { major, minor: major * 0.75 };
+      });
       this._track(this.viewer.entities.add({
         position: Cesium.Cartesian3.fromDegrees(lon, lat),
         ellipse: {
-          semiMajorAxis: new Cesium.CallbackProperty(() => {
-            const t = ((this._elapsed() * 0.35 + phase) % 1);
-            return floodR * (0.25 + t * 0.9);
-          }, false),
-          semiMinorAxis: new Cesium.CallbackProperty(() => {
-            const t = ((this._elapsed() * 0.35 + phase) % 1);
-            return floodR * 0.75 * (0.25 + t * 0.9);
-          }, false),
+          semiMajorAxis: axes.semiMajorAxis,
+          semiMinorAxis: axes.semiMinorAxis,
           height: 10,
           outline: true,
           outlineColor: new Cesium.CallbackProperty(() => {
@@ -1023,11 +1049,15 @@ export class ActiveSimulation {
     if (mask) {
       this._renderBurnableScar(mask, lon, lat, fireR, burnRadius);
     } else {
+      const axes = this._ellipseAxisPair(() => {
+        const major = burnRadius.val;
+        return { major, minor: major * 0.7 };
+      });
       this._track(this.viewer.entities.add({
         position: Cesium.Cartesian3.fromDegrees(lon, lat),
         ellipse: {
-          semiMajorAxis: new Cesium.CallbackProperty(() => burnRadius.val, false),
-          semiMinorAxis: new Cesium.CallbackProperty(() => burnRadius.val * 0.7, false),
+          semiMajorAxis: axes.semiMajorAxis,
+          semiMinorAxis: axes.semiMinorAxis,
           height: 50,
           material: new Cesium.ColorMaterialProperty(
             new Cesium.CallbackProperty(() =>
@@ -1554,17 +1584,16 @@ export class ActiveSimulation {
     // Pulsing temperature rings
     for (let i = 0; i < 3; i++) {
       const phase = i * 0.33;
+      const axes = this._ellipseAxisPair((elapsed) => {
+        const t = ((elapsed * 0.28 + phase) % 1);
+        const major = radius * (0.18 + t * 1.1);
+        return { major, minor: major * 0.75 };
+      });
       this._track(this.viewer.entities.add({
         position: Cesium.Cartesian3.fromDegrees(lon, lat),
         ellipse: {
-          semiMajorAxis: new Cesium.CallbackProperty(() => {
-            const t = ((this._elapsed() * 0.28 + phase) % 1);
-            return radius * (0.18 + t * 1.1);
-          }, false),
-          semiMinorAxis: new Cesium.CallbackProperty(() => {
-            const t = ((this._elapsed() * 0.28 + phase) % 1);
-            return radius * 0.75 * (0.18 + t * 1.1);
-          }, false),
+          semiMajorAxis: axes.semiMajorAxis,
+          semiMinorAxis: axes.semiMinorAxis,
           height: 200,
           outline: true,
           outlineColor: new Cesium.CallbackProperty(() => {
@@ -1663,17 +1692,19 @@ export class ActiveSimulation {
     // Shockwave rings
     for (let i = 0; i < 3; i++) {
       const phase = i * 0.33;
+      // One time sample per frame for both axes — equal major/minor (circle)
+      // previously raced on two independent _elapsed() reads and threw
+      // DeveloperError: semiMajorAxis must be >= semiMinorAxis.
+      const axes = this._ellipseAxisPair((elapsed) => {
+        const t = ((elapsed * 0.18 + phase) % 1);
+        const r = 40_000 + t * 650_000;
+        return { major: r, minor: r };
+      });
       this._track(this.viewer.entities.add({
         position: Cesium.Cartesian3.fromDegrees(lon, lat),
         ellipse: {
-          semiMajorAxis: new Cesium.CallbackProperty(() => {
-            const t = ((this._elapsed() * 0.18 + phase) % 1);
-            return 40_000 + t * 650_000;
-          }, false),
-          semiMinorAxis: new Cesium.CallbackProperty(() => {
-            const t = ((this._elapsed() * 0.18 + phase) % 1);
-            return 40_000 + t * 650_000;
-          }, false),
+          semiMajorAxis: axes.semiMajorAxis,
+          semiMinorAxis: axes.semiMinorAxis,
           height: 2000,
           outline: true,
           outlineColor: new Cesium.CallbackProperty(() => {
@@ -1851,27 +1882,28 @@ export class ActiveSimulation {
     }
 
     // Expanding pulse ring — visual life within the 30fps budget.
-    this._track(this.viewer.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(lon, lat),
-      ellipse: {
-        semiMajorAxis: new Cesium.CallbackProperty(() => {
-          const t = (this._elapsed() * 0.25) % 1;
-          return radius * (0.2 + t * 1.2);
-        }, false),
-        semiMinorAxis: new Cesium.CallbackProperty(() => {
-          const t = (this._elapsed() * 0.25) % 1;
-          return radius * 0.8 * (0.2 + t * 1.2);
-        }, false),
-        height: 200,
-        outline: true,
-        outlineColor: new Cesium.CallbackProperty(() => {
-          const t = (this._elapsed() * 0.25) % 1;
-          return Cesium.Color.fromCssColorString(tint).withAlpha((1 - t) * 0.4);
-        }, false),
-        outlineWidth: 1.5,
-        material: new Cesium.ColorMaterialProperty(Cesium.Color.TRANSPARENT),
-      },
-    }));
+    {
+      const axes = this._ellipseAxisPair((elapsed) => {
+        const t = (elapsed * 0.25) % 1;
+        const major = radius * (0.2 + t * 1.2);
+        return { major, minor: major * 0.8 };
+      });
+      this._track(this.viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(lon, lat),
+        ellipse: {
+          semiMajorAxis: axes.semiMajorAxis,
+          semiMinorAxis: axes.semiMinorAxis,
+          height: 200,
+          outline: true,
+          outlineColor: new Cesium.CallbackProperty(() => {
+            const t = (this._elapsed() * 0.25) % 1;
+            return Cesium.Color.fromCssColorString(tint).withAlpha((1 - t) * 0.4);
+          }, false),
+          outlineWidth: 1.5,
+          material: new Cesium.ColorMaterialProperty(Cesium.Color.TRANSPARENT),
+        },
+      }));
+    }
 
     // ── Baked stats label (ImpactStats default branch: temp anomaly + precip
     // + national population) — never the parser magnitude on-screen.
