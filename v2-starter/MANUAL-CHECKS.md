@@ -23,3 +23,10 @@ so the parse-scenario edge function's origin validation rejects the request
 before the model call. Symptom: immediate generic chat failure, ~31 ms CPU,
 no exception in Supabase logs. That is the origin check working correctly.
 Do **not** add the webview origin to the allowlist to make in-IDE testing work.
+
+**Before starting an eyeball pass:** confirm the page's loaded JS bundle matches
+`dist/assets/` (DevTools → Network, or View Source → `script`/`module` href).
+A stale `vite preview` or cached tab can serve yesterday's hash while `src/`
+already has today's fix — two separate environment traps in one session cost
+more time than the features did. If they diverge, rebuild and hard-refresh
+(or restart preview) before testing.
