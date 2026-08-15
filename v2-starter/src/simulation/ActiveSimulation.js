@@ -177,6 +177,11 @@ export class ActiveSimulation {
    * time advances between evaluations and semiMinorAxis can briefly exceed
    * semiMajorAxis → Cesium DeveloperError that kills the render loop.
    *
+   * Also clamps minor ≤ major each sample. That clamp cannot live in _track():
+   * ellipse axes are often CallbackProperties whose values are unknown at
+   * entity-add time — a static read there would miss every animated frame.
+   * This helper is the chokepoint that actually sees the dynamic values.
+   *
    * @param {(elapsedSec: number) => { major: number, minor: number }} compute
    * @returns {{ semiMajorAxis: import('cesium').CallbackProperty, semiMinorAxis: import('cesium').CallbackProperty }}
    */
@@ -187,8 +192,10 @@ export class ActiveSimulation {
       if (slot.frame !== frame) {
         slot.frame = frame;
         const { major, minor } = compute(this._elapsed());
-        slot.major = major;
-        slot.minor = minor;
+        const m = Math.max(Number(major) || 0, 1);
+        slot.major = m;
+        // Cesium hard requirement — never let a future animation kill the loop.
+        slot.minor = Math.min(Math.max(Number(minor) || 0, 0), m);
       }
       return slot;
     };
